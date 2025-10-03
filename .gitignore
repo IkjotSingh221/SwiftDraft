@@ -205,3 +205,46 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# --- Project-specific additions for frontend and backend ---
+
+# Frontend (Node / React)
+# node modules and build output
+frontend/node_modules/
+frontend/build/
+frontend/dist/
+# local env files
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
+
+# Backend (Python / Flask) - scoped to backend/ subfolder
+backend/.venv/
+backend/venv/
+backend/instance/
+backend/.env
+
+# Node / tooling logs and caches
+frontend/.pnp/
+frontend/.pnp.js
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/.cache/
+frontend/test-results/
+frontend/storybook-static/
+
+# Editor/OS artifacts
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Backend Node artifacts
+backend/node_modules/*
+backend/.pnp/
+backend/.pnp.js
+backend/npm-debug.log*
+backend/yarn-debug.log*
+backend/yarn-error.log*
+
