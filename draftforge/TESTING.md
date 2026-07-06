@@ -415,3 +415,88 @@ mocked; no Docker, GPU, or API keys).
   review node (drafter already checkpointed) rather than a real SIGKILL; the
   checkpoint/resume machinery exercised is identical. A real process-kill drill
   is flagged for Phase 8.
+
+---
+
+## Phase 6 — Rendering
+
+Run: `cd draftforge && uv run pytest -q`. All hermetic tests mock the LLM
+roles/hybrid-search (same fixture pattern as `test_redraft_api.py`) and the
+Pandoc subprocess itself (`shutil.which` + `render.pandoc.run_pandoc`) — no
+Docker, GPU, API keys, or real `pandoc`/LaTeX install required. One test is
+genuinely optional and skips cleanly on a machine without `pandoc` on `PATH`.
+
+### Automated — backend (`uv run pytest`)
+
+| Test | Purpose | Status |
+| --- | --- | --- |
+| `test_render_assemble.py::test_sections_appear_in_outline_order_with_correct_heading_depth` | Outline walk order == document order; heading depth == `len(parent_path)+1` | PASS |
+| `test_render_assemble.py::test_leaf_body_is_spliced_verbatim_and_citation_markers_preserved` | Each leaf's on-disk body is spliced unmodified; `[@key]`/`[@k1;@k2]` markers survive | PASS |
+| `test_render_assemble.py::test_missing_draft_file_gets_a_visible_placeholder_not_a_crash` | A leaf with no draft file (flagged/incomplete) gets a visible placeholder, assembly doesn't raise | PASS |
+| `test_render_assemble.py::test_references_leaf_is_skipped_entirely` | A leaf whose spec section has `word_range: null` ("references") is skipped entirely -- no heading, no body -- Pandoc/citeproc generates the bibliography instead | PASS |
+| `test_render_assemble.py::test_figure_captions_renumbered_coherently_across_sections` | Figure captions guessed wrong by parallel per-leaf drafting are renumbered into one coherent document-wide sequence | PASS |
+| `test_render_assemble.py::test_chapter_scoped_caption_numbering_resets_per_chapter` | `"chapter_decimal"` table numbering (university_thesis) resets at each top-level outline node | PASS |
+| `test_render_assemble.py::test_assemble_run_raises_on_empty_outline` | `assemble_run` raises `AssembleError` (not a silent empty doc) when there's no outline yet | PASS |
+| `test_render_assemble.py::test_assemble_run_end_to_end_sets_front_matter_and_number_sections` | `assemble_run`'s `AssembledDocument` sets `number_sections` from the spec and threads `run_config.front_matter` through | PASS |
+| `test_render_assemble.py::test_front_matter_fields_default_to_bracketed_placeholders` | Missing title-page fields get a visible `[FIELD]` placeholder, never silently blank | PASS |
+| `test_render_assemble.py::test_front_matter_underscore_fields_get_a_hyphenated_alias` | `submission_date` is aliased to `submission-date` too (bridges the spec/template naming mismatch) | PASS |
+| `test_render_assemble.py::test_front_matter_supplied_abstract_is_used_verbatim` | A supplied abstract passes through unchanged (no placeholder override) | PASS |
+| `test_render_api.py::test_unknown_run_404s_on_every_render_endpoint` | `GET artifacts`, `GET artifacts/{name}`, `POST render` on an unknown run all 404 | PASS |
+| `test_render_api.py::test_artifacts_before_completion_is_409` | Both artifact endpoints 409 before the run reaches "completed" | PASS |
+| `test_render_api.py::test_unknown_artifact_name_404s` | A name outside the `ARTIFACT_SPECS` whitelist 404s | PASS |
+| `test_render_api.py::test_path_traversal_name_is_rejected` | Hostile-shaped names (`../../../etc/passwd`, percent-encoded traversal) 404 via whitelist-only lookup, never leak file content | PASS |
+| `test_render_api.py::test_full_run_render_list_and_download_round_trip` | End-to-end: approve -> `POST render` -> `GET artifacts` lists all 5 whitelisted names with correct availability/size/content-type -> `GET artifacts/{name}` round-trips docx/bibliography/decisions bytes; the Phase 7 eval-report slot 404s (not yet written) | PASS |
+| `test_render_api.py::test_get_artifacts_lazily_renders_on_first_call_without_an_explicit_post` | `GET artifacts` alone (no prior `POST render`) triggers the best-effort lazy render for a completed run | PASS |
+| `test_render_api.py::test_render_is_idempotent_and_does_not_re_shell_out_via_get` | Once artifacts exist, further `GET` calls make ZERO additional `run_pandoc` calls (lazy trigger only fires on an empty artifacts dir) | PASS |
+| `test_render_api.py::test_render_without_pandoc_is_a_502_but_bibliography_still_available` | `pandoc` entirely missing -> `POST render` is a 502 `RenderError`, but the already-copied bibliography artifact remains listed/available | PASS |
+| `test_render_api.py::test_live_pandoc_renders_a_real_minimal_docx` | OPTIONAL: a real `pandoc` binary renders a trivial doc to a genuine (non-empty, zip-magic `PK`) `.docx` | SKIPPED (no `pandoc` on `PATH` in this sandbox; verified to skip cleanly via `@pytest.mark.skipif`) |
+
+Run: `cd draftforge && uv run pytest -q` -> **165 passed, 2 skipped** (Phase
+0-5's 146 + Phase 6's 19, one of which skips; the other skip is Phase 1's
+optional live-GROBID test).
+
+### Build / smoke checks
+
+| Check | Purpose | Status |
+|---|---|---|
+| `npx tsc -b` | Frontend (incl. new `Downloads.tsx` + `api/client.ts` Artifact/RenderResponse additions) type-checks with no errors | PASS |
+| `npm run build` | Frontend still builds for production | PASS |
+| `npm run test -- --run` | Phase 0's 2 frontend tests still pass unmodified (no new Vitest tests added — Downloads' data-fetching/render-trigger logic is a thin wrapper over the same API contract already covered end-to-end by `tests/test_render_api.py`, same precedent as Outline Review/Run Dashboard/Review) | PASS |
+
+### Manual UI checks — NOT RUN this session (no browser available)
+
+| Check | Purpose | Status |
+|---|---|---|
+| Downloads — light mode | Run-id input, artifact rows (docx/pdf/bibliography/decisions/eval-report-slot), Render button, flagged-sections caveat all readable/usable | NOT RUN |
+| Downloads — dark mode | Same, dark theme tokens applied, no unreadable contrast | NOT RUN |
+| Render a real run end-to-end with real Pandoc + LaTeX installed | Confirm `draft.docx` opens in Word/LibreOffice with correct headings/numbering/citations, `draft.pdf` opens and matches the spec's template | NOT RUN |
+| Click "Render" on a run with a flagged section, then download | Confirm the flagged-sections caveat banner appears and the rendered document still includes that section's text as-is | NOT RUN |
+
+### Known gaps / notes
+
+- No real `pandoc`/LaTeX install was available this session (confirmed via
+  `shutil.which`) — every render test mocks the subprocess boundary; the one
+  optional live test (`test_live_pandoc_renders_a_real_minimal_docx`) is
+  written and gated correctly but was never actually exercised against a
+  real binary. Flag for Phase 8 (or any machine with `pandoc`+`texlive`
+  installed) to run `uv run pytest tests/test_render_api.py -k live -q` and
+  confirm the real path.
+- No real 50+ page draft has been rendered end-to-end; the hermetic tests use
+  a handful of short synthetic leaves. A real multi-section render (docx
+  opens cleanly, headings/numbering/citations match the spec visually) is
+  flagged for Phase 8's full manual sweep, per spec.md Phase 6's own
+  acceptance test ("rendered docx opens, headings/numbering/citations match
+  spec").
+- Cross-reference resolution is limited to figure/table CAPTION numbers (see
+  DECISIONS.md) — in-prose references to a figure/table by number are not
+  tracked or rewritten, since no cross-reference marker syntax exists
+  anywhere in Phases 3-5's output.
+- No abstract-drafting step exists anywhere in Phases 0-5; front matter's
+  `abstract` field is always either a caller-supplied `run_config` value or a
+  visible placeholder. See DECISIONS.md.
+- Real `IEEEtran.cls`/official CSL styles are still the Phase 2 placeholders
+  (`specs/csl/*.csl`, `templates/*.tex`) — Phase 6 renders against whatever
+  Phase 2 shipped; swapping in the real files needs no Phase 6 code changes
+  per Phase 2's own DECISIONS.md note.
+- Frontend manual/visual checks are unexercised (no browser this session);
+  flag for a human pass before Phase 8's full manual sweep.

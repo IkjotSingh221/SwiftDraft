@@ -123,3 +123,31 @@ class SectionStatus(BaseModel):
     ] = "queued"
     tokens_used: int = 0
     cost_usd: float = 0.0
+
+
+# ---------------------------------------------------------------------------
+# Rendering / artifacts (Phase 6)
+# ---------------------------------------------------------------------------
+
+
+class Artifact(BaseModel):
+    """One entry in `GET /runs/{id}/artifacts`'s whitelist-driven listing
+    (see `render/pandoc.py::ARTIFACT_SPECS`) -- `available=False` entries
+    (not yet rendered, or the Phase 7 eval report slot) are still listed so
+    the Downloads screen can show a disabled/greyed-out row with `note`
+    instead of the item simply not existing."""
+
+    name: str
+    available: bool
+    size_bytes: int | None = None
+    content_type: str
+    note: str | None = None
+
+
+class RenderResponse(BaseModel):
+    """Result of `POST /runs/{id}/render`: which artifacts were (re)generated
+    vs. skipped this call, with a short human-readable reason per skip (e.g.
+    "pdf-engine 'xelatex' is not installed")."""
+
+    generated: list[str] = Field(default_factory=list)
+    skipped: dict[str, str] = Field(default_factory=dict)

@@ -11,19 +11,38 @@ full per-run agent-decision log, optionally filtered to one section) are all
 implemented. `approve_outline` is UNCHANGED from Phase 3 (still a single
 synchronous `build_graph.resume(run_id)` call) — see DECISIONS.md for why
 that stays synchronous even though it now runs the drafter fan-out too.
-TODO(Phase 5): verifier/continuity/compliance loop + redraft + resume.
-TODO(Phase 6): rendering + artifact downloads.
+Phase 5: verifier/continuity/compliance loop + redraft + resume are
+implemented (`get_review`, `redraft_section`, `resume_run`).
+
+Phase 6: `POST /runs/{id}/render` explicitly (re)renders a completed run's
+artifacts via `render/pandoc.py::render_run`. `GET /runs/{id}/artifacts`
+lists the whitelisted artifact set (name/size/content-type; unrendered/Phase
+7 entries show `available=False`), lazily triggering a best-effort render on
+first call if the run is completed and nothing has been rendered yet (see
+`_ensure_rendered_best_effort` — failures there are logged, never raised, so
+a listing call never 5xx's just because Pandoc/LaTeX aren't installed; use
+the explicit POST to see the real error). `GET /runs/{id}/artifacts/{name}`
+streams one artifact by NAME, looked up only in the `ARTIFACT_SPECS`
+whitelist (never used to construct a filesystem path directly) — this is
+the path-traversal guard: an unknown/hostile `name` simply isn't in the
+dict and 404s.
 """
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from draftforge.api import sse
-from draftforge.api.models import OutlineNode, Run, RunCreate, SectionStatus
+from draftforge.api.models import Artifact, OutlineNode, RenderResponse, Run, RunCreate, SectionStatus
 from draftforge.graph import build_graph, decisions
 from draftforge.graph import review as review_mod
+from draftforge.render import pandoc as pandoc_render
+
+logger = logging.getLogger(__name__)
 
 
 class RedraftRequest(BaseModel):
@@ -226,7 +245,109 @@ def resume_run(run_id: str) -> Run:
     )
 
 
-@router.get("/{run_id}/artifacts/{name}", status_code=501)
+def _ensure_rendered_best_effort(run_id: str) -> None:
+    """Best-effort lazy render: if the run's artifacts directory is empty,
+    render once. Failures are logged and swallowed here — `GET /artifacts`
+    and `GET /artifacts/{name}` should still return whatever IS available
+    (e.g. an already-copied bibliography.json) rather than 5xx just because
+    Pandoc/LaTeX aren't installed; `POST /render` is the endpoint that
+    surfaces a `RenderError` to the caller."""
+    out_dir = pandoc_render.artifacts_dir(run_id)
+    if any(out_dir.iterdir()):
+        return
+    try:
+        pandoc_render.render_run(run_id)
+    except (ValueError, pandoc_render.RenderError) as exc:
+        logger.warning("lazy render for run %r skipped/failed: %s", run_id, exc)
+
+
+@router.post("/{run_id}/render", response_model=RenderResponse)
+def render_run(run_id: str) -> RenderResponse:
+    """Explicitly (re)render a completed run's artifacts. Unlike the lazy
+    trigger on `GET /artifacts`, a real rendering failure here IS surfaced to
+    the caller (502) — this is the endpoint to call to see why a document
+    didn't render, or to refresh artifacts after a section redraft (Phase 6
+    does not auto-invalidate previously rendered artifacts; call this again
+    to pick up changes)."""
+    meta = build_graph.get_run_meta(run_id)
+    if meta is None:
+        raise HTTPException(status_code=404, detail=f"Unknown run_id: {run_id!r}")
+    try:
+        result = pandoc_render.render_run(run_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except pandoc_render.RenderError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return RenderResponse(generated=result.generated, skipped=result.skipped)
+
+
+@router.get("/{run_id}/artifacts", response_model=list[Artifact])
+def list_artifacts(run_id: str) -> list[Artifact]:
+    """List the whitelisted artifact set (docx, pdf, bibliography, decisions
+    log, and the Phase 7 eval-report slot) with name/size/content-type.
+    Lazily renders once (best-effort) if nothing has been rendered yet for a
+    completed run — see `_ensure_rendered_best_effort`."""
+    meta = build_graph.get_run_meta(run_id)
+    if meta is None:
+        raise HTTPException(status_code=404, detail=f"Unknown run_id: {run_id!r}")
+    state = build_graph.get_state(run_id)
+    if state is None or state.get("status") != "completed":
+        raise HTTPException(
+            status_code=409,
+            detail=f"run {run_id!r} is not completed yet (status={meta.get('status')!r})",
+        )
+    _ensure_rendered_best_effort(run_id)
+
+    out: list[Artifact] = []
+    for name, spec in pandoc_render.ARTIFACT_SPECS.items():
+        path = spec.path_fn(run_id)
+        if path.exists():
+            out.append(
+                Artifact(
+                    name=name,
+                    available=True,
+                    size_bytes=path.stat().st_size,
+                    content_type=spec.content_type,
+                    note=None,
+                )
+            )
+        else:
+            out.append(
+                Artifact(
+                    name=name,
+                    available=False,
+                    size_bytes=None,
+                    content_type=spec.content_type,
+                    note=spec.note_if_missing,
+                )
+            )
+    return out
+
+
+@router.get("/{run_id}/artifacts/{name}")
 def get_artifact(run_id: str, name: str):
-    # TODO(Phase 6): serve rendered docx/PDF/bibliography/decisions log.
-    raise HTTPException(status_code=501, detail=_NOT_IMPLEMENTED)
+    """Stream one artifact by name. `name` is looked up ONLY in the
+    `ARTIFACT_SPECS` whitelist (never used to build a filesystem path
+    directly) — an unknown or path-traversal-shaped name simply isn't a key
+    in that dict and 404s, same as a known name whose file doesn't exist
+    yet."""
+    meta = build_graph.get_run_meta(run_id)
+    if meta is None:
+        raise HTTPException(status_code=404, detail=f"Unknown run_id: {run_id!r}")
+    spec = pandoc_render.ARTIFACT_SPECS.get(name)
+    if spec is None:
+        raise HTTPException(status_code=404, detail=f"Unknown artifact name: {name!r}")
+    state = build_graph.get_state(run_id)
+    if state is None or state.get("status") != "completed":
+        raise HTTPException(
+            status_code=409,
+            detail=f"run {run_id!r} is not completed yet (status={meta.get('status')!r})",
+        )
+    _ensure_rendered_best_effort(run_id)
+
+    path = spec.path_fn(run_id)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"artifact {name!r} is not available for run {run_id!r}")
+    return FileResponse(path=str(path), media_type=spec.content_type, filename=name)

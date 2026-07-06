@@ -184,6 +184,23 @@ export interface ReviewResult {
   continuity: ContinuityDiff[];
 }
 
+// ---------------------------------------------------------------------------
+// Artifacts / rendering (Phase 6 — downloads)
+// ---------------------------------------------------------------------------
+
+export interface Artifact {
+  name: string;
+  available: boolean;
+  size_bytes: number | null;
+  content_type: string;
+  note: string | null;
+}
+
+export interface RenderResponse {
+  generated: string[];
+  skipped: Record<string, string>;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(path, {
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
@@ -255,6 +272,10 @@ export const api = {
     ),
   resumeRun: (runId: string) =>
     request<Run>(`${API_BASE}/runs/${runId}/resume`, { method: "POST" }),
+  listArtifacts: (runId: string) =>
+    request<Artifact[]>(`${API_BASE}/runs/${runId}/artifacts`),
+  renderRun: (runId: string) =>
+    request<RenderResponse>(`${API_BASE}/runs/${runId}/render`, { method: "POST" }),
 };
 
 /** Absolute path to the SSE events endpoint for a run — passed straight to
@@ -262,6 +283,13 @@ export const api = {
  * `request()` since it's a streaming GET, not a JSON round trip. */
 export function runEventsUrl(runId: string): string {
   return `${API_BASE}/runs/${runId}/events`;
+}
+
+/** Absolute path to one artifact's download URL — used directly as an
+ * `<a href>` (a real browser navigation/download), not fetched via
+ * `request()`, since the response is a binary file stream, not JSON. */
+export function artifactUrl(runId: string, name: string): string {
+  return `${API_BASE}/runs/${runId}/artifacts/${encodeURIComponent(name)}`;
 }
 
 export const ROLES: Role[] = [
