@@ -138,6 +138,52 @@ export interface DecisionRecord {
   payload: Record<string, unknown>;
 }
 
+// ---------------------------------------------------------------------------
+// Review (Phase 5 — citation verifier / compliance / continuity)
+// ---------------------------------------------------------------------------
+
+export interface CitationCheck {
+  claim: string;
+  cited_keys: string[];
+  supported: boolean;
+  reason: string;
+  supporting_excerpt: string;
+}
+
+export interface ComplianceViolation {
+  section_id: string;
+  code: string;
+  severity: string;
+  message: string;
+  details: Record<string, unknown>;
+}
+
+export interface SectionReview {
+  section_id: string;
+  title: string;
+  status: "done" | "flagged";
+  attempts: number;
+  compliance_violations: ComplianceViolation[];
+  invalid_keys: string[];
+  citations: CitationCheck[];
+}
+
+export interface ContinuityDiff {
+  a_id: string;
+  b_id: string;
+  a_before: string;
+  a_after: string;
+  b_before: string;
+  b_after: string;
+  changed: boolean;
+  note: string;
+}
+
+export interface ReviewResult {
+  sections: SectionReview[];
+  continuity: ContinuityDiff[];
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(path, {
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
@@ -201,6 +247,14 @@ export const api = {
     request<DecisionRecord[]>(
       `${API_BASE}/runs/${runId}/decisions${sectionId ? `?section_id=${encodeURIComponent(sectionId)}` : ""}`,
     ),
+  getReview: (runId: string) => request<ReviewResult>(`${API_BASE}/runs/${runId}/review`),
+  redraftSection: (runId: string, sectionId: string, feedback?: string) =>
+    request<SectionReview>(
+      `${API_BASE}/runs/${runId}/sections/${sectionId}/redraft`,
+      { method: "POST", body: JSON.stringify({ feedback: feedback ?? null }) },
+    ),
+  resumeRun: (runId: string) =>
+    request<Run>(`${API_BASE}/runs/${runId}/resume`, { method: "POST" }),
 };
 
 /** Absolute path to the SSE events endpoint for a run — passed straight to

@@ -379,3 +379,39 @@ Full suite: `cd draftforge && uv run pytest -q` -> **116 passed, 1 skipped** (Ph
   real-LLM pass.
 - Frontend manual/visual checks are unexercised (no browser this session);
   flag for a human pass before Phase 8's full manual sweep.
+
+## Phase 5 — Verifier, continuity, compliance loop
+
+Run: `cd draftforge && uv run pytest -q`. All Phase 5 tests are hermetic
+(LLM roles, `hybrid_search`/`retrieve_chunks`, and the store are injected/
+mocked; no Docker, GPU, or API keys).
+
+| Test | Purpose | Status |
+| --- | --- | --- |
+| `test_graph_verifier.py::test_extract_claims_only_returns_cited_sentences` | Only cited sentences become claims | PASS |
+| `test_graph_verifier.py::test_supported_claim_passes` | NLI "supported" verdict → section ok | PASS |
+| `test_graph_verifier.py::test_unsupported_claim_is_flagged_with_feedback` | Unsupported claim flagged + feedback string (#3) | PASS |
+| `test_graph_verifier.py::test_bad_key_backstop_rejects_key_not_in_store` | Key not in bibliography rejected (#2 backstop) | PASS |
+| `test_graph_verifier.py::test_claim_with_no_supporting_chunk_is_unsupported_without_an_llm_call` | No chunk → unsupported, no LLM call (#3) | PASS |
+| `test_graph_verifier.py::test_section_with_no_citations_is_ok_and_makes_no_llm_call` | No citations → ok, no call | PASS |
+| `test_graph_verifier.py::test_verifier_degrades_gracefully_when_model_raises` | Verifier model failure never crashes the run | PASS |
+| `test_graph_verifier.py::test_load_valid_bibkeys_reads_store_or_returns_none` | Bibliography store load / None when missing | PASS |
+| `test_graph_compliance.py` (4) | Code-based compliance: compliant passes, over-limit/heading-depth caught, blocking subset + feedback (#4) | PASS |
+| `test_graph_continuity.py` (6) | Boundary-only patch (bodies unchanged, #1/#6), change/no-op/failure handling | PASS |
+| `test_review_node.py::test_supported_section_completes_without_redraft` | Clean section → done, 0 redrafts | PASS |
+| `test_review_node.py::test_unsupported_section_redrafts_then_flags_for_human` | Bounded redraft (max 2) then flag | PASS |
+| `test_review_node.py::test_compliance_violation_routes_back_to_drafter_then_passes` | Compliance violation → redraft → passes | PASS |
+| `test_review_node.py::test_missing_draft_file_is_flagged` | No draft file → flagged | PASS |
+| `test_review_node.py::test_review_node_end_to_end_writes_review_and_continuity` | review.json + section_status + continuity produced | PASS |
+| `test_kill_resume.py::test_crash_in_review_resumes_without_redrafting` | Kill-and-resume drill: resume from checkpoint, drafter NOT re-run (#5) | PASS |
+| `test_kill_resume.py::test_resume_run_before_approval_is_rejected` | Crash-recovery refuses an unapproved run | PASS |
+| `test_kill_resume.py::test_resume_run_on_completed_run_is_a_noop` | Resuming a completed run is a no-op | PASS |
+| `test_redraft_api.py` (4) | GET /review, POST redraft, POST resume (404/409/round-trip) via TestClient | PASS |
+
+- Manual UI check (deferred to Phase 8, no browser this session): Review screen
+  in BOTH light and dark — flagged citations (claim / source chunk / verdict),
+  Accept + Redraft actions, continuity boundary diffs.
+- The kill-and-resume drill here simulates the crash by raising inside the
+  review node (drafter already checkpointed) rather than a real SIGKILL; the
+  checkpoint/resume machinery exercised is identical. A real process-kill drill
+  is flagged for Phase 8.

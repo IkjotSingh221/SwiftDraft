@@ -323,7 +323,9 @@ def test_fanout_produces_all_sections_with_bounded_parallelism(monkeypatch):
         hybrid_search_fn=lambda *a, **k: [_hit("c1", ["valid1"])],
     )
 
-    assert result["status"] == "completed"
+    # Phase 5: the drafter hands off to the review node with "verifying"; the
+    # review node sets the terminal "completed" status.
+    assert result["status"] == "verifying"
     section_status = result["section_status"]
     assert set(section_status.keys()) == set(leaf_ids)
     assert all(entry["status"] == "done" for entry in section_status.values())

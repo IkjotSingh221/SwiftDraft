@@ -460,3 +460,59 @@ phases: add to the bottom, don't rewrite history.
   concurrent poller can observe progress. Phase 5 may want to revisit this
   once the verifier/continuity/compliance loop adds even more per-run
   latency.
+
+## Phase 5 — Verifier, continuity, compliance loop
+
+- **One `review` node, not three graph nodes.** Compliance + citation
+  verification (with a bounded per-section redraft loop) + continuity all run
+  inside a single `graph/review.py::review_node`, mirroring Phase 4's
+  single-node `drafter_fanout_node`. Rationale: the redraft loop is per-section
+  and bounded (max 2, then flag), and continuity runs once over adjacent
+  boundaries — expressing that as LangGraph conditional edges would need a
+  per-section fan-out with its own checkpoint sub-scheme for no benefit on a
+  single-user tool. Keeps the checkpointer's unit of work one `RunState`
+  update per super-step. Graph is now `planner -> drafter -> review -> END`.
+- **Review runs sequentially** (unlike the parallel drafter): it is cheaper,
+  the continuity pass needs a stable left-to-right order, and a shared
+  `DocumentState` updated after each redraft stays coherent without locking.
+- **Supporting chunks are re-retrieved for verification.** Phase 4's drafter
+  persists only prose + the citation keys used, not the retrieved chunks, so
+  the verifier re-runs `drafter.retrieve_chunks` (filtered by the leaf's source
+  tags) and indexes `SearchHit.text` by each hit's `bibkeys`. This leaves
+  Phase 4 untouched and reuses one retrieval path. A cited claim whose key has
+  no retrieved chunk fails traceability outright (no LLM call); the rest go to
+  a single batched NLI call.
+- **Redraft-with-feedback reuses `draft_leaf` unchanged**: the compliance/
+  verifier failures are appended to the brief's `brief` text (which
+  `draft_leaf` already threads into the draft prompt) rather than adding a
+  `feedback` parameter to Phase 4's drafter — the whole corrective-RAG pipeline
+  is reused verbatim.
+- **Bad-key backstop needs the store present.** `load_valid_bibkeys` returns
+  `None` (unknown) when a project's `bibliography.json` is missing, and the
+  verifier then SKIPS the bad-key check rather than flagging every citation —
+  `None` is deliberately distinct from an empty set.
+- **Graceful degradation.** An unreachable verifier or continuity model never
+  crashes a run (matching the drafter's stance): the NLI call and each boundary
+  edit are wrapped, degrading to "no violation manufactured" / "no-op patch".
+- **Continuity patches only boundary paragraphs.** `apply_boundary_patch` swaps
+  exactly A's last paragraph and B's first paragraph and rejoins the rest
+  verbatim — the single code-enforced guarantee that bodies never change (#1/#6).
+- **Crash recovery (`resume_run`)** distinguishes an approved-but-crashed run
+  from an unapproved one using the run registry: if the checkpoint is still at
+  the planner interrupt but the registry has moved past approval (`resume`
+  stamps `"drafting"` before invoking), the run is continued; otherwise it is
+  refused with "approve first". A crash inside `review` re-runs only `review`
+  from the drafter's checkpoint — proven by `test_kill_resume.py` asserting the
+  drafter call count stays at 1 across the crash.
+- **`POST /runs/{id}/resume` vs `resume()`**: the existing `resume()` helper is
+  the ordinary planner-approval resume (`POST /approve`); the new
+  `resume_run()` (`POST /resume`) is the crash-recovery path for a run already
+  past approval. Kept as two functions so approval can never be bypassed by the
+  crash-recovery endpoint.
+- **Redraft persistence**: the human-triggered `POST /sections/{id}/redraft`
+  patches the checkpointed `section_status`/`document_state` via `update_state`
+  and rewrites the single section's entry in `data/runs/{id}/review.json`; the
+  Review screen re-fetches `GET /review`.
+- **"Accept as-is" is client-side.** The Review screen's Accept action dismisses
+  a flagged section locally (no backend state) — the draft on disk is already
+  the accepted artifact; a flag is advisory. Kept simple deliberately.

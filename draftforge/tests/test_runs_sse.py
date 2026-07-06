@@ -64,8 +64,10 @@ class _FakeDrafterProvider:
 def client(tmp_path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
 
+    import draftforge.graph.continuity as continuity_mod
     import draftforge.graph.drafter as drafter_mod
     import draftforge.graph.planner as planner_mod
+    import draftforge.graph.verifier as verifier_mod
     from draftforge.api.app import app
 
     monkeypatch.setattr(planner_mod, "sample_retrieval", lambda *a, **k: {})
@@ -73,6 +75,10 @@ def client(tmp_path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setattr(drafter_mod, "resolve_model", lambda role: (_FakeDrafterProvider(), "fake-drafter"))
     monkeypatch.setattr(drafter_mod, "get_qdrant_client", lambda: object())
     monkeypatch.setattr(drafter_mod, "hybrid_search", lambda *a, **k: [])
+    # Phase 5: the review node resolves the verifier + continuity models too;
+    # mock them so the full run stays hermetic and fast (no Ollama retries).
+    monkeypatch.setattr(verifier_mod, "resolve_model", lambda role: (_FakeDrafterProvider(), "fake-verifier"))
+    monkeypatch.setattr(continuity_mod, "resolve_model", lambda role: (_FakeDrafterProvider(), "fake-continuity"))
 
     return TestClient(app)
 
@@ -126,8 +132,12 @@ def test_events_endpoint_delivers_section_status_and_token_usage(client: TestCli
 
     section_events = [f for f in frames if f["event"] == "section_status"]
     statuses_for_intro = [f["data"]["status"] for f in section_events if f["data"].get("section_id") == "introduction"]
-    # queued -> drafting -> critiquing -> done, in that order.
-    assert statuses_for_intro == ["queued", "drafting", "critiquing", "done"]
+    # The drafter path (queued -> drafting -> critiquing -> done) is the prefix;
+    # Phase 5's review node then appends a "verifying" transition (and, if it
+    # redrafts, further drafting/critiquing events). We assert the drafter
+    # prefix is intact and that verification happened.
+    assert statuses_for_intro[:4] == ["queued", "drafting", "critiquing", "done"]
+    assert "verifying" in statuses_for_intro
 
     token_events = [f for f in frames if f["event"] == "token_usage"]
     assert token_events, "expected at least one token_usage event"

@@ -49,11 +49,23 @@ class _FakeProvider:
 def client(tmp_path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
 
+    import draftforge.graph.continuity as continuity_mod
+    import draftforge.graph.drafter as drafter_mod
     import draftforge.graph.planner as planner_mod
+    import draftforge.graph.verifier as verifier_mod
     from draftforge.api.app import app
 
+    fake = lambda role: (_FakeProvider(), "fake-model")  # noqa: E731
     monkeypatch.setattr(planner_mod, "sample_retrieval", lambda *a, **k: {})
-    monkeypatch.setattr(planner_mod, "resolve_model", lambda role: (_FakeProvider(), "fake-model"))
+    monkeypatch.setattr(planner_mod, "resolve_model", fake)
+    # Phase 5: approving now runs the drafter + review (verifier/continuity)
+    # nodes too; mock every role + the store so the whole run stays hermetic
+    # and fast (no real Ollama/Qdrant, no retry backoff).
+    monkeypatch.setattr(drafter_mod, "resolve_model", fake)
+    monkeypatch.setattr(drafter_mod, "get_qdrant_client", lambda: object())
+    monkeypatch.setattr(drafter_mod, "hybrid_search", lambda *a, **k: [])
+    monkeypatch.setattr(verifier_mod, "resolve_model", fake)
+    monkeypatch.setattr(continuity_mod, "resolve_model", fake)
 
     return TestClient(app)
 

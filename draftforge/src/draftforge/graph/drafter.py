@@ -894,14 +894,13 @@ def drafter_fanout_node(
                     cumulative_cost_usd=cumulative_cost,
                 )
 
-    emit_event(run_id, "run_status", status="completed")
+    # Phase 5: the review node (citation verifier / compliance / continuity)
+    # runs after this node and sets the terminal "completed" status itself, so
+    # the drafter hands off with an intermediate "verifying" status.
+    emit_event(run_id, "run_status", status="verifying")
 
     return {
-        # TODO(Phase 5): once citation verifier / continuity editor / compliance
-        # checker nodes are inserted after "drafter" in build_graph.py, this
-        # should become an intermediate status (e.g. "verifying") and the LAST
-        # of those nodes should set "completed" instead.
-        "status": "completed",
+        "status": "verifying",
         "document_state": doc_box.dump(),
         "section_status": section_status,
     }

@@ -46,8 +46,20 @@ class _FakeProvider:
 
 @pytest.fixture(autouse=True)
 def _mock_llm_and_retrieval(monkeypatch: pytest.MonkeyPatch):
+    import draftforge.graph.continuity as continuity_mod
+    import draftforge.graph.drafter as drafter_mod
+    import draftforge.graph.verifier as verifier_mod
+
+    fake = lambda role: (_FakeProvider(), "fake-model")  # noqa: E731
     monkeypatch.setattr(planner_mod, "sample_retrieval", lambda *a, **k: {})
-    monkeypatch.setattr(planner_mod, "resolve_model", lambda role: (_FakeProvider(), "fake-model"))
+    monkeypatch.setattr(planner_mod, "resolve_model", fake)
+    # Phase 5: resume() now runs drafter + review; mock those roles + the store
+    # so the resume tests stay hermetic and fast.
+    monkeypatch.setattr(drafter_mod, "resolve_model", fake)
+    monkeypatch.setattr(drafter_mod, "get_qdrant_client", lambda: object())
+    monkeypatch.setattr(drafter_mod, "hybrid_search", lambda *a, **k: [])
+    monkeypatch.setattr(verifier_mod, "resolve_model", fake)
+    monkeypatch.setattr(continuity_mod, "resolve_model", fake)
 
 
 @pytest.fixture()

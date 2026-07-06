@@ -68,6 +68,7 @@ from draftforge.config import get_settings
 from draftforge.graph import decisions
 from draftforge.graph.drafter import drafter_fanout_node
 from draftforge.graph.planner import planner_node
+from draftforge.graph.review import review_node
 from draftforge.graph.state import DocumentState, RunState
 
 _registry_lock = threading.Lock()
@@ -98,42 +99,32 @@ def _open_graph(db_path: str | Path | None = None) -> Iterator[CompiledStateGrap
 def get_graph(checkpointer: SqliteSaver) -> CompiledStateGraph:
     """Compile the graph against a given checkpointer.
 
-    ## Graph shape (Phase 4)
+    ## Graph shape (Phase 5)
 
-        START -> planner -> drafter -> END
+        START -> planner -> drafter -> review -> END
                  ^^^^^^^
         interrupt_after=["planner"]
 
-    "drafter" (`graph/drafter.py::drafter_fanout_node`) is a single node that
-    internally fans out over every leaf brief with bounded parallelism (a
-    `ThreadPoolExecutor`, not nested LangGraph subgraphs/`Send` — see
-    drafter.py's module docstring and DECISIONS.md for why) and folds each
-    leaf's result into `document_state`/`section_status`. It is currently the
-    LAST node before END, so it sets `status="completed"` itself.
+    "drafter" (`graph/drafter.py::drafter_fanout_node`) fans out over every
+    leaf brief with bounded parallelism and folds each leaf's result into
+    `document_state`/`section_status`, handing off with status "verifying".
 
-    TODO(Phase 5): insert the citation verifier / continuity editor /
-    compliance checker as new node(s) BETWEEN "drafter" and END (i.e. change
-    `builder.add_edge("drafter", END)` below to
-    `builder.add_edge("drafter", "citation_verifier")` etc., ending with
-    `builder.add_edge(<last Phase 5 node>, END)`). Two things Phase 5 needs
-    from this file:
-      1. `drafter_fanout_node`'s return dict should stop setting
-         `"status": "completed"` once something follows it — have it return
-         an intermediate status (e.g. "verifying") instead, and let the new
-         last node set "completed"/"error".
-      2. A per-section redraft (`POST /runs/{id}/sections/{id}/redraft`) can
-         reuse `drafter.draft_leaf(brief, document_state_snapshot, ...)`
-         directly for just the one flagged leaf, then re-run
-         `drafter.apply_document_state_update` and patch
-         `state["section_status"][id]` via `update_state` — no need to
-         replay the whole fan-out node.
+    "review" (`graph/review.py::review_node`) then runs, per section, the
+    programmatic compliance checker + the citation verifier with a bounded
+    redraft loop (max 2, then flag for human), followed by the continuity
+    editor over adjacent boundaries; it is the LAST node before END and sets
+    the terminal "completed" status. A crash INSIDE review re-runs review from
+    the drafter's checkpoint without re-drafting (spec.md #5; see
+    `resume_run` below and `tests/test_kill_resume.py`).
     """
     builder = StateGraph(RunState)
     builder.add_node("planner", planner_node)
     builder.add_node("drafter", drafter_fanout_node)
+    builder.add_node("review", review_node)
     builder.add_edge(START, "planner")
     builder.add_edge("planner", "drafter")
-    builder.add_edge("drafter", END)
+    builder.add_edge("drafter", "review")
+    builder.add_edge("review", END)
     return builder.compile(checkpointer=checkpointer, interrupt_after=["planner"])
 
 
@@ -336,3 +327,86 @@ def resume(run_id: str, *, db_path: str | Path | None = None) -> RunState:
     final_status = (snapshot.values or {}).get("status", "completed")
     _registry_set(run_id, status=final_status)
     return snapshot.values  # type: ignore[return-value]
+
+
+# ---------------------------------------------------------------------------
+# Phase 5: crash recovery + single-section redraft
+# ---------------------------------------------------------------------------
+
+_TERMINAL_STATUSES = {"completed", "error"}
+
+
+def resume_run(run_id: str, *, db_path: str | Path | None = None) -> RunState:
+    """Resume a run that was interrupted *after* approval (a crash mid-draft or
+    mid-review), continuing it to completion from the SqliteSaver checkpoint —
+    the `POST /runs/{id}/resume` crash-recovery path (spec.md non-negotiable
+    #5).
+
+    Distinguished from `resume()` (which handles the ordinary planner-approval
+    resume): this one is for a run already past approval. Because the drafter
+    checkpoints before the review node, re-invoking here continues from the
+    last completed node WITHOUT re-running it — a crash inside review re-runs
+    only review, not the (expensive) drafter fan-out.
+
+    Raises `KeyError` if the run is unknown/uncheckpointed, `ValueError` if the
+    run hasn't been approved yet (use `POST /approve` first).
+    """
+    meta = get_run_meta(run_id)
+    if meta is None:
+        raise KeyError(f"unknown run_id: {run_id!r}")
+    current = get_state(run_id, db_path=db_path)
+    if current is None:
+        raise KeyError(f"run {run_id!r} has no checkpointed state yet")
+
+    checkpoint_status = current.get("status")
+    if checkpoint_status in _TERMINAL_STATUSES:
+        return current  # nothing to resume
+
+    # A checkpoint still parked at the planner interrupt means the run was only
+    # resumed if the registry already moved it past approval (resume() stamps
+    # "drafting" before invoking). If neither is true, it genuinely hasn't been
+    # approved yet.
+    registry_status = meta.get("status")
+    if checkpoint_status == "awaiting_outline_approval" and registry_status in {
+        "queued",
+        "planning",
+        "awaiting_outline_approval",
+    }:
+        raise ValueError(f"run {run_id!r} has not been approved yet; POST /approve first")
+
+    _registry_set(run_id, status=checkpoint_status or "drafting")
+    with _open_graph(db_path) as graph:
+        config = _thread_config(run_id)
+        graph.invoke(None, config)
+        snapshot = graph.get_state(config)
+
+    final_status = (snapshot.values or {}).get("status", "completed")
+    _registry_set(run_id, status=final_status, error=(snapshot.values or {}).get("error"))
+    return snapshot.values  # type: ignore[return-value]
+
+
+def redraft_section(
+    run_id: str,
+    section_id: str,
+    feedback: str | None = None,
+    *,
+    db_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Human-triggered redraft of one section from the Review screen. Redrafts
+    + re-verifies just that leaf, patches the checkpointed state via
+    `update_state`, and returns the fresh `SectionReview` dict.
+
+    Raises `KeyError` if the run/section is unknown.
+    """
+    from draftforge.graph import review as review_mod
+
+    current = get_state(run_id, db_path=db_path)
+    if current is None:
+        raise KeyError(f"run {run_id!r} has no checkpointed state yet")
+
+    update = review_mod.redraft_single_section(current, section_id, feedback)
+    section_review = update.pop("section_review")
+    with _open_graph(db_path) as graph:
+        config = _thread_config(run_id)
+        graph.update_state(config, update)
+    return section_review
