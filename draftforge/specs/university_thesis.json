@@ -1,0 +1,125 @@
+{
+  "spec_id": "university_thesis",
+  "name": "University Thesis Chapter Structure",
+  "version": "1.0.0",
+  "description": "Thesis chapter -> section -> subsection hierarchy, larger word ranges than a conference report, chapter-scoped figure/table numbering, APA-style citations.",
+  "sections": [
+    {
+      "id": "introduction",
+      "title": "Introduction",
+      "required": true,
+      "max_heading_depth": 2,
+      "word_range": { "min": 1500, "max": 3500 },
+      "subsections": [
+        {
+          "id": "background",
+          "title": "Background",
+          "required": true,
+          "max_heading_depth": 1,
+          "word_range": { "min": 400, "max": 1200 },
+          "subsections": []
+        },
+        {
+          "id": "problem_statement",
+          "title": "Problem Statement",
+          "required": true,
+          "max_heading_depth": 1,
+          "word_range": { "min": 300, "max": 900 },
+          "subsections": []
+        },
+        {
+          "id": "thesis_organization",
+          "title": "Thesis Organization",
+          "required": false,
+          "max_heading_depth": 1,
+          "word_range": { "min": 100, "max": 400 },
+          "subsections": []
+        }
+      ]
+    },
+    {
+      "id": "literature_review",
+      "title": "Literature Review",
+      "required": true,
+      "max_heading_depth": 2,
+      "word_range": { "min": 2500, "max": 6000 },
+      "allow_extra_subsections": true,
+      "subsections": [
+        {
+          "id": "related_work",
+          "title": "Related Work",
+          "required": true,
+          "max_heading_depth": 1,
+          "word_range": { "min": 1000, "max": 3000 },
+          "subsections": []
+        },
+        {
+          "id": "research_gap",
+          "title": "Research Gap",
+          "required": true,
+          "max_heading_depth": 1,
+          "word_range": { "min": 400, "max": 1200 },
+          "subsections": []
+        }
+      ]
+    },
+    {
+      "id": "methodology",
+      "title": "Methodology",
+      "required": true,
+      "max_heading_depth": 2,
+      "word_range": { "min": 2000, "max": 5000 },
+      "subsections": []
+    },
+    {
+      "id": "results_discussion",
+      "title": "Results and Discussion",
+      "required": true,
+      "max_heading_depth": 2,
+      "word_range": { "min": 2000, "max": 5000 },
+      "subsections": []
+    },
+    {
+      "id": "conclusion",
+      "title": "Conclusion and Future Work",
+      "required": true,
+      "max_heading_depth": 1,
+      "word_range": { "min": 800, "max": 2000 },
+      "subsections": []
+    },
+    {
+      "id": "references",
+      "title": "References",
+      "required": true,
+      "max_heading_depth": 1,
+      "word_range": null,
+      "subsections": []
+    }
+  ],
+  "citation_style": {
+    "style_id": "apa",
+    "csl_file": "csl/apa.csl",
+    "marker_style": "pandoc_at_key"
+  },
+  "heading_numbering": {
+    "style": "decimal",
+    "start_level": 1
+  },
+  "front_matter": {
+    "title_page_fields": [
+      "title",
+      "author",
+      "degree",
+      "institution",
+      "department",
+      "supervisor",
+      "submission_date"
+    ],
+    "abstract_required": true,
+    "abstract_word_range": { "min": 250, "max": 350 }
+  },
+  "captions": {
+    "figure": { "prefix": "Figure", "numbering": "chapter_decimal", "required": true, "min_words": 4 },
+    "table": { "prefix": "Table", "numbering": "chapter_decimal", "required": true, "min_words": 4 }
+  }
+}

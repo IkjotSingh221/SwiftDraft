@@ -42,6 +42,37 @@ export interface HealthResponse {
   grobid_reachable: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// Projects / sources (Phase 1 — ingestion)
+// ---------------------------------------------------------------------------
+
+export interface Project {
+  id: string;
+  name: string;
+  format_spec: string | null;
+  status: string;
+}
+
+export interface ProjectCreate {
+  name: string;
+  format_spec?: string | null;
+}
+
+export type SourceIngestStatus =
+  | "queued"
+  | "parsing"
+  | "chunking"
+  | "embedding"
+  | "done"
+  | "error";
+
+export interface SourceStatus {
+  source_id: string;
+  filename: string;
+  status: SourceIngestStatus;
+  error: string | null;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(path, {
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
@@ -54,6 +85,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await resp.json()) as T;
 }
 
+/** Like `request`, but for multipart/form-data uploads — never sets a JSON
+ * Content-Type header, since the browser must set its own multipart
+ * boundary. */
+async function upload<T>(path: string, formData: FormData): Promise<T> {
+  const resp = await fetch(path, { method: "POST", body: formData });
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => "");
+    throw new Error(`POST ${path} failed: ${resp.status} ${body}`);
+  }
+  return (await resp.json()) as T;
+}
+
 export const api = {
   health: () => request<HealthResponse>(`${API_BASE}/health`),
   getRoleModels: () => request<RoleModelsResponse>(`${API_BASE}/settings/models`),
@@ -62,6 +105,20 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(update),
     }),
+  createProject: (payload: ProjectCreate) =>
+    request<Project>(`${API_BASE}/projects`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  getProject: (projectId: string) =>
+    request<Project>(`${API_BASE}/projects/${projectId}`),
+  uploadSource: (projectId: string, file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    return upload<SourceStatus>(`${API_BASE}/projects/${projectId}/sources`, formData);
+  },
+  listSources: (projectId: string) =>
+    request<SourceStatus[]>(`${API_BASE}/projects/${projectId}/sources`),
 };
 
 export const ROLES: Role[] = [

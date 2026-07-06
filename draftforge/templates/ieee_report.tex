@@ -1,0 +1,41 @@
+%% DraftForge Pandoc template for the "ieee_report" format spec.
+%%
+%% This is a minimal, hand-written Pandoc LaTeX template -- not the full
+%% IEEEtran document class. IEEEtran.cls is a binary-adjacent, third-party
+%% distribution file; vendoring it here would break the "text-based /
+%% diffable templates" choice documented in DECISIONS.md. For camera-ready
+%% IEEE submissions, change `documentclass` below (via the defaults file's
+%% `variables.documentclass`) to `IEEEtran` and place the real class file
+%% next to the rendered .tex -- everything else in this template ($body$,
+%% citeproc-generated references, title block) still applies unchanged.
+%%
+%% Phase 6 invocation (see templates/ieee_report.yaml for the full command):
+%%   pandoc assembled.md --defaults=templates/ieee_report.yaml \
+%%     --metadata-file=run_metadata.yaml \
+%%     --bibliography=run_bibliography.json -o draft.pdf
+%%
+\documentclass[$if(fontsize)$$fontsize$,$endif$$for(classoption)$$classoption$$sep$,$endfor$]{$documentclass$}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{hyperref}
+$if(geometry)$\usepackage[$geometry$]{geometry}$endif$
+
+$if(title)$\title{$title$}$endif$
+\author{$for(author)$$author$$sep$ \and $endfor$}
+\date{$date$}
+
+\begin{document}
+
+$if(title)$\maketitle$endif$
+
+$if(abstract)$
+\begin{abstract}
+$abstract$
+\end{abstract}
+$endif$
+
+$body$
+
+\end{document}

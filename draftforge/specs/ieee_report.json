@@ -1,0 +1,92 @@
+{
+  "spec_id": "ieee_report",
+  "name": "IEEE-style Conference/Technical Report",
+  "version": "1.0.0",
+  "description": "IEEE-style conference paper / technical report: introduction through references, tight word ranges, decimal section numbering, IEEE citation style. Abstract and title-page fields are handled as front matter, not as a numbered section.",
+  "sections": [
+    {
+      "id": "introduction",
+      "title": "Introduction",
+      "required": true,
+      "max_heading_depth": 1,
+      "word_range": { "min": 400, "max": 900 },
+      "subsections": []
+    },
+    {
+      "id": "related_work",
+      "title": "Related Work",
+      "required": true,
+      "max_heading_depth": 1,
+      "word_range": { "min": 300, "max": 700 },
+      "subsections": []
+    },
+    {
+      "id": "method",
+      "title": "Method",
+      "required": true,
+      "max_heading_depth": 2,
+      "word_range": { "min": 600, "max": 1400 },
+      "allow_extra_subsections": true,
+      "subsections": [
+        {
+          "id": "method_data",
+          "title": "Data",
+          "required": true,
+          "max_heading_depth": 1,
+          "word_range": { "min": 100, "max": 400 },
+          "subsections": []
+        },
+        {
+          "id": "method_approach",
+          "title": "Approach",
+          "required": true,
+          "max_heading_depth": 1,
+          "word_range": { "min": 200, "max": 600 },
+          "subsections": []
+        }
+      ]
+    },
+    {
+      "id": "results",
+      "title": "Results",
+      "required": true,
+      "max_heading_depth": 1,
+      "word_range": { "min": 400, "max": 1000 },
+      "subsections": []
+    },
+    {
+      "id": "conclusion",
+      "title": "Conclusion",
+      "required": true,
+      "max_heading_depth": 1,
+      "word_range": { "min": 150, "max": 400 },
+      "subsections": []
+    },
+    {
+      "id": "references",
+      "title": "References",
+      "required": true,
+      "max_heading_depth": 1,
+      "word_range": null,
+      "subsections": []
+    }
+  ],
+  "citation_style": {
+    "style_id": "ieee",
+    "csl_file": "csl/ieee.csl",
+    "marker_style": "pandoc_at_key"
+  },
+  "heading_numbering": {
+    "style": "decimal",
+    "start_level": 1
+  },
+  "front_matter": {
+    "title_page_fields": ["title", "authors", "affiliation", "contact_email"],
+    "abstract_required": true,
+    "abstract_word_range": { "min": 150, "max": 250 }
+  },
+  "captions": {
+    "figure": { "prefix": "Fig.", "numbering": "decimal", "required": true, "min_words": 3 },
+    "table": { "prefix": "Table", "numbering": "decimal", "required": true, "min_words": 3 }
+  }
+}

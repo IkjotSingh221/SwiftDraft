@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  PLACEHOLDER CSL STYLE -- not a complete/official IEEE citation style.
+
+  This file exists so `specs/ieee_report.json`'s `citation_style.csl_file`
+  points at something that parses, and so Phase 6's Pandoc/citeproc
+  invocation has a concrete `--csl` path to wire up and test against.
+
+  Before a real run, replace this with the actual IEEE CSL style from the
+  official, community-maintained style repository:
+    https://github.com/citation-style-language/styles/blob/master/ieee.csl
+  (drop the downloaded file in at this same path -- no other config changes
+  needed, since `specs/ieee_report.json` already references "csl/ieee.csl").
+-->
+<style xmlns="http://purl.org/net/xbiblio/csl" class="note" version="1.0" demote-non-dropping-particle="display-and-sort">
+  <info>
+    <title>IEEE (DraftForge placeholder)</title>
+    <id>https://draftforge.local/csl/ieee-placeholder</id>
+    <category citation-format="numeric"/>
+    <category field="engineering"/>
+    <summary>Placeholder numeric-style CSL. Swap for the real IEEE style before rendering a real draft.</summary>
+    <updated>2024-01-01T00:00:00Z</updated>
+  </info>
+  <citation>
+    <layout prefix="[" suffix="]" delimiter=", ">
+      <text variable="citation-number"/>
+    </layout>
+  </citation>
+  <bibliography>
+    <layout>
+      <text variable="citation-number" prefix="[" suffix="] "/>
+      <text macro="author" suffix=", "/>
+      <text variable="title" suffix=". "/>
+      <text variable="container-title" font-style="italic" suffix=", "/>
+      <date variable="issued">
+        <date-part name="year"/>
+      </date>
+      <text value="."/>
+    </layout>
+  </bibliography>
+  <macro name="author">
+    <names variable="author">
+      <name and="text" delimiter=", "/>
+    </names>
+  </macro>
+</style>

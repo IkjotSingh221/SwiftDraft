@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+  <teiHeader>
+    <fileDesc>
+      <titleStmt>
+        <title>A Study of Photosynthesis in Controlled Environments</title>
+      </titleStmt>
+    </fileDesc>
+  </teiHeader>
+  <text>
+    <body>
+      <div>
+        <head>1 Introduction</head>
+        <pb n="1"/>
+        <p>Photosynthesis is the process by which plants convert light energy into
+        chemical energy. This paper investigates the rate of photosynthesis under
+        controlled greenhouse conditions.</p>
+        <div>
+          <head>1.1 Background</head>
+          <p>Prior work has established the basic biochemistry of the Calvin cycle,
+          but few studies control for humidity and CO2 concentration simultaneously.</p>
+        </div>
+      </div>
+      <div>
+        <head>2 Methods</head>
+        <pb n="2"/>
+        <p>We used a randomized controlled trial design with three greenhouse
+        chambers, each held at a different CO2 concentration.</p>
+        <div>
+          <head>2.1 Data collection</head>
+          <p>Leaf samples were collected every six hours over a two week period
+          and analyzed with a gas exchange analyzer.</p>
+        </div>
+      </div>
+    </body>
+    <back>
+      <div type="references">
+        <listBibl>
+          <biblStruct xml:id="b0">
+            <analytic>
+              <title level="a">A Great Paper on Plant Biology</title>
+              <author>
+                <persName>
+                  <forename type="first">Jane</forename>
+                  <surname>Smith</surname>
+                </persName>
+              </author>
+            </analytic>
+            <monogr>
+              <title level="j">Journal of Botany</title>
+              <imprint>
+                <date type="published" when="2020-01-01">2020</date>
+              </imprint>
+            </monogr>
+          </biblStruct>
+          <biblStruct xml:id="b1">
+            <analytic>
+              <title level="a">Another Study, Same Year</title>
+              <author>
+                <persName>
+                  <forename type="first">John</forename>
+                  <surname>Smith</surname>
+                </persName>
+              </author>
+            </analytic>
+            <monogr>
+              <title level="j">Journal of Botany</title>
+              <imprint>
+                <date type="published" when="2020-06-01">2020</date>
+              </imprint>
+            </monogr>
+          </biblStruct>
+          <biblStruct xml:id="b2">
+            <analytic>
+              <title level="a">Gas Exchange Methods in Greenhouses</title>
+              <author>
+                <persName>
+                  <forename type="first">Alice</forename>
+                  <surname>Doe</surname>
+                </persName>
+              </author>
+            </analytic>
+            <monogr>
+              <title level="j">Plant Methods Review</title>
+              <imprint>
+                <date type="published" when="2018-01-01">2018</date>
+              </imprint>
+            </monogr>
+          </biblStruct>
+        </listBibl>
+      </div>
+    </back>
+  </text>
+</TEI>

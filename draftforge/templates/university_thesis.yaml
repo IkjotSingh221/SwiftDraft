@@ -1,0 +1,43 @@
+# Pandoc defaults file for the "university_thesis" format spec.
+# https://pandoc.org/MANUAL.html#defaults-files
+#
+# Phase 6 (render/pandoc.py) should invoke, after deterministically
+# concatenating the approved chapters/sections in outline order:
+#
+#   pandoc assembled.md \
+#     --defaults=templates/university_thesis.yaml \
+#     --metadata-file=<run>/front_matter.yaml \      # title/author/degree/institution/
+#                                                     # department/supervisor/submission_date,
+#                                                     # per front_matter.title_page_fields in
+#                                                     # specs/university_thesis.json
+#     --bibliography=<run>/bibliography.json \       # CSL-JSON, the run's bib store
+#     -o draft.pdf                                    # or draft.docx, see ieee_report.yaml's
+#                                                     # note on why no binary reference-doc
+#                                                     # is checked in
+#
+# `--top-level-division=chapter` is REQUIRED here (not just a nicety): the
+# spec's chapters (specs/university_thesis.json's top-level `sections`) are
+# level-1 Markdown headings, and without this flag Pandoc maps level-1
+# headings to \section, which would not match this template's \chapter use
+# in the title-page/table-of-contents flow.
+
+from: markdown+smart
+template: templates/university_thesis.tex
+standalone: true
+citeproc: true
+csl: specs/csl/apa.csl
+number-sections: true
+top-level-division: chapter
+
+variables:
+  documentclass: report
+  classoption:
+    - "12pt"
+  geometry: "margin=1in"
+
+metadata:
+  link-citations: true
+  reference-section-title: "References"
+  toc: true
+
+pdf-engine: xelatex

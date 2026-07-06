@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  PLACEHOLDER CSL STYLE -- not a complete/official APA citation style.
+
+  This file exists so `specs/university_thesis.json`'s
+  `citation_style.csl_file` points at something that parses, and so Phase
+  6's Pandoc/citeproc invocation has a concrete `--csl` path to wire up and
+  test against.
+
+  Before a real run, replace this with the actual APA CSL style from the
+  official, community-maintained style repository:
+    https://github.com/citation-style-language/styles/blob/master/apa.csl
+  (drop the downloaded file in at this same path -- no other config changes
+  needed, since `specs/university_thesis.json` already references
+  "csl/apa.csl").
+-->
+<style xmlns="http://purl.org/net/xbiblio/csl" class="in-text" version="1.0" demote-non-dropping-particle="display-and-sort">
+  <info>
+    <title>APA (DraftForge placeholder)</title>
+    <id>https://draftforge.local/csl/apa-placeholder</id>
+    <category citation-format="author-date"/>
+    <category field="generic-base"/>
+    <summary>Placeholder author-date CSL. Swap for the real APA style before rendering a real draft.</summary>
+    <updated>2024-01-01T00:00:00Z</updated>
+  </info>
+  <citation>
+    <layout prefix="(" suffix=")" delimiter="; ">
+      <group delimiter=", ">
+        <text macro="author-short"/>
+        <date variable="issued">
+          <date-part name="year"/>
+        </date>
+      </group>
+    </layout>
+  </citation>
+  <bibliography>
+    <layout suffix=".">
+      <text macro="author" suffix=" "/>
+      <date variable="issued" prefix="(" suffix="). ">
+        <date-part name="year"/>
+      </date>
+      <text variable="title" suffix=". "/>
+      <text variable="container-title" font-style="italic"/>
+    </layout>
+  </bibliography>
+  <macro name="author">
+    <names variable="author">
+      <name and="text" delimiter=", " initialize-with=". "/>
+    </names>
+  </macro>
+  <macro name="author-short">
+    <names variable="author">
+      <name form="short" and="text" delimiter=", "/>
+    </names>
+  </macro>
+</style>

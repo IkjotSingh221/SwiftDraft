@@ -1,0 +1,42 @@
+# Pandoc defaults file for the "ieee_report" format spec.
+# https://pandoc.org/MANUAL.html#defaults-files
+#
+# Phase 6 (render/pandoc.py) should invoke, after deterministically
+# concatenating the approved leaf sections in outline order:
+#
+#   pandoc assembled.md \
+#     --defaults=templates/ieee_report.yaml \
+#     --metadata-file=<run>/front_matter.yaml \      # title/authors/affiliation/etc,
+#                                                     # one field per
+#                                                     # front_matter.title_page_fields
+#                                                     # in specs/ieee_report.json
+#     --bibliography=<run>/bibliography.json \       # CSL-JSON, the run's bib store
+#     -o draft.pdf                                    # or draft.docx (see note below)
+#
+# For DOCX output: drop `template`/`pdf-engine` (Pandoc's docx writer does not
+# consume a LaTeX template) and either rely on Pandoc's default docx styling
+# -- `citeproc`/`csl`/`number-sections` below still apply -- or supply a
+# binary `--reference-doc=...`. We intentionally do not check in a binary
+# reference .docx here (see DECISIONS.md: "text-based templates only");
+# Phase 6 can add one later as a gitignored, regenerable asset if visual
+# fidelity beyond Pandoc's defaults is needed.
+
+from: markdown+smart
+template: templates/ieee_report.tex
+standalone: true
+citeproc: true
+csl: specs/csl/ieee.csl
+number-sections: true
+
+variables:
+  documentclass: article
+  classoption:
+    - "10pt"
+    - "twocolumn"
+  geometry: "margin=0.75in"
+
+metadata:
+  link-citations: true
+  reference-section-title: "References"
+
+pdf-engine: xelatex

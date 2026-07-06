@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://draftforge.local/schemas/format_spec.schema.json",
+  "title": "DraftForge format specification",
+  "description": "Describes the required section structure, citation style, heading numbering, front-matter, and caption rules a drafted document must comply with. Validated programmatically (see src/draftforge/formats/validator.py) -- never by an LLM.",
+  "type": "object",
+  "required": [
+    "spec_id",
+    "name",
+    "version",
+    "sections",
+    "citation_style",
+    "heading_numbering",
+    "front_matter",
+    "captions"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "spec_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+$",
+      "description": "Stable, unique, filesystem/URL-safe identifier for this spec."
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-readable display name shown in the UI spec picker."
+    },
+    "version": {
+      "type": "string",
+      "description": "Semver-ish string for the spec revision, e.g. '1.0.0'."
+    },
+    "description": {
+      "type": "string",
+      "default": ""
+    },
+    "sections": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/section" },
+      "description": "Ordered, top-level required sections of the document body (front matter and references/bibliography formatting are handled separately below)."
+    },
+    "citation_style": { "$ref": "#/$defs/citation_style" },
+    "heading_numbering": { "$ref": "#/$defs/heading_numbering" },
+    "front_matter": { "$ref": "#/$defs/front_matter" },
+    "captions": { "$ref": "#/$defs/captions" }
+  },
+  "$defs": {
+    "word_range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["min", "max"],
+      "properties": {
+        "min": { "type": "integer", "minimum": 0 },
+        "max": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "section": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9_]+$",
+          "description": "Stable identifier, unique within the spec, used as the leaf/section key throughout the pipeline."
+        },
+        "title": {
+          "type": "string",
+          "description": "Section heading text (numbering, if any, is applied on top of this at render/validate time)."
+        },
+        "required": {
+          "type": "boolean",
+          "default": true,
+          "description": "If false, the section/subsection is optional; its absence from a produced document is not a violation."
+        },
+        "max_heading_depth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 6,
+          "default": 1,
+          "description": "Deepest Markdown ATX heading level ('#' count) permitted to appear inside this section's own drafted text."
+        },
+        "word_range": {
+          "anyOf": [{ "$ref": "#/$defs/word_range" }, { "type": "null" }],
+          "default": null,
+          "description": "Target word-count range for this section's own drafted prose. Null means not word-count checked (e.g. an auto-generated references section)."
+        },
+        "allow_extra_subsections": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, subsections beyond the required/optional ones listed here are permitted without triggering a violation."
+        },
+        "subsections": {
+          "type": "array",
+          "default": [],
+          "items": { "$ref": "#/$defs/section" },
+          "description": "Recursive child sections (chapter -> section -> subsection, etc.)."
+        }
+      }
+    },
+    "citation_style": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["style_id", "csl_file", "marker_style"],
+      "properties": {
+        "style_id": {
+          "type": "string",
+          "description": "Short identifier for the citation style, e.g. 'ieee', 'apa'."
+        },
+        "csl_file": {
+          "type": "string",
+          "description": "Path (relative to the specs/ directory) to the CSL style file Pandoc should use for citeproc rendering."
+        },
+        "marker_style": {
+          "type": "string",
+          "enum": ["pandoc_at_key"],
+          "description": "The in-prose citation marker syntax drafters must emit. Only Pandoc's '[@bibkey]' form is supported (see spec.md constraint #2: citations are keys, never free text)."
+        }
+      }
+    },
+    "heading_numbering": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["style"],
+      "properties": {
+        "style": {
+          "type": "string",
+          "enum": ["decimal", "none"],
+          "description": "'decimal' requires headings to carry a numeric prefix (e.g. '2.1 Title'); 'none' requires headings to carry no numeric prefix."
+        },
+        "start_level": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1,
+          "description": "Heading level at which numbering begins (levels above this, if any, e.g. an unnumbered part title, are exempt)."
+        }
+      }
+    },
+    "front_matter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title_page_fields"],
+      "properties": {
+        "title_page_fields": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Required title-page metadata field names, e.g. ['title', 'author', 'institution']."
+        },
+        "abstract_required": {
+          "type": "boolean",
+          "default": true
+        },
+        "abstract_word_range": {
+          "anyOf": [{ "$ref": "#/$defs/word_range" }, { "type": "null" }],
+          "default": null
+        }
+      }
+    },
+    "captions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["figure", "table"],
+      "properties": {
+        "figure": { "$ref": "#/$defs/caption_rule" },
+        "table": { "$ref": "#/$defs/caption_rule" }
+      }
+    },
+    "caption_rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["prefix", "numbering"],
+      "properties": {
+        "prefix": {
+          "type": "string",
+          "description": "Literal caption label prefix, e.g. 'Fig.', 'Figure', 'Table'."
+        },
+        "numbering": {
+          "type": "string",
+          "enum": ["decimal", "chapter_decimal", "none"],
+          "description": "'decimal' = 'Table 1'; 'chapter_decimal' = 'Table 2.3' (chapter-scoped); 'none' = no number, just the prefix."
+        },
+        "required": {
+          "type": "boolean",
+          "default": true
+        },
+        "min_words": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Minimum word count of the caption's descriptive text (excluding the prefix/number)."
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,43 @@
+%% DraftForge Pandoc template for the "university_thesis" format spec.
+%%
+%% `sections` in specs/university_thesis.json map to LaTeX \chapter{}
+%% (documentclass: report), with the spec's `subsections` / nested
+%% `subsections` mapping to \section{}/\subsection{}. Phase 6's Pandoc
+%% invocation MUST pass `--top-level-division=chapter` so Pandoc's own
+%% Markdown-heading-to-LaTeX-sectioning mapping lines up with this
+%% template's \chapter use (see templates/university_thesis.yaml).
+%%
+\documentclass[$if(fontsize)$$fontsize$,$endif$$for(classoption)$$classoption$$sep$,$endfor$]{$documentclass$}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{hyperref}
+$if(geometry)$\usepackage[$geometry$]{geometry}$endif$
+
+\begin{document}
+
+\begin{titlepage}
+\centering
+$if(title)${\LARGE $title$ \par}$endif$
+\vspace{2cm}
+{\large $for(author)$$author$$sep$ \and $endfor$ \par}
+\vspace{1cm}
+$if(degree)${\large $degree$ \par}$endif$
+$if(department)${\large $department$ \par}$endif$
+$if(institution)${\large $institution$ \par}$endif$
+$if(supervisor)${\large Supervisor: $supervisor$ \par}$endif$
+\vfill
+$if(submission-date)${\large $submission-date$ \par}$endif$
+\end{titlepage}
+
+$if(abstract)$
+\chapter*{Abstract}
+$abstract$
+$endif$
+
+\tableofcontents
+
+$body$
+
+\end{document}
