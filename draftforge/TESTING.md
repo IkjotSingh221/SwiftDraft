@@ -225,3 +225,83 @@ optional live-GROBID test, unrelated to Phase 2).
 - Caption-rule checking is a line-based heuristic (adjacent-line only, no
   multi-line caption paragraphs); documented as a known simplification in
   DECISIONS.md.
+
+---
+
+## Phase 3 — Planner + human-in-the-loop
+
+### Automated — backend (`uv run pytest`)
+
+| Test | Purpose | Status |
+|---|---|---|
+| `tests/test_graph_state.py::test_document_state_round_trips_through_dump_and_validate` | `DocumentState.model_dump()` -> `model_validate()` round-trips to an equal model | PASS |
+| `tests/test_graph_state.py::test_document_state_defaults_are_empty_and_compact` | An empty `DocumentState` renders to `""` / 0 tokens | PASS |
+| `tests/test_graph_state.py::test_document_state_stays_compact_for_a_document_sized_ledger` | A ~40-leaf-section, 60-citation, 30-claim ledger (simulating a 50+ page doc) still serializes well under the spec.md ~4k token budget | PASS |
+| `tests/test_graph_state.py::test_outline_tree_node_is_leaf_and_iter_tree` | `OutlineTreeNode.is_leaf()`/`iter_tree()` behave correctly on a 2-node tree | PASS |
+| `tests/test_graph_state.py::test_section_brief_round_trips` | `SectionBrief` round-trips through dump/validate | PASS |
+| `tests/test_graph_decisions.py::test_log_decision_appends_one_json_line_per_call` | `log_decision` appends one well-formed JSON record per call | PASS |
+| `tests/test_graph_decisions.py::test_read_decisions_returns_records_in_order` | `read_decisions` returns records in append order | PASS |
+| `tests/test_graph_decisions.py::test_read_decisions_on_missing_file_returns_empty_list` | Reading a run with no decisions log yet returns `[]`, not an error | PASS |
+| `tests/test_graph_planner.py::test_outline_conforms_to_spec_structure` | A MOCKED planner LLM's well-formed JSON outline produces an outline/leaf_briefs whose ids/nesting exactly match `ieee_report.json`'s required-section tree; `resolve_model("planner")` is used (never a hardcoded model name); decisions (retrieval_sample/raw_outline/validation) are logged | PASS |
+| `tests/test_graph_planner.py::test_malformed_llm_outline_is_rejected_and_repaired` | A non-JSON LLM response degrades to the deterministic spec skeleton — required structure still present, `unparseable_or_empty_llm_outline` violation logged | PASS |
+| `tests/test_graph_planner.py::test_partial_llm_outline_missing_a_required_section_is_repaired` | An LLM outline missing a required section and with an out-of-range `target_words` is repaired (section filled in from the skeleton, word count clamped into the spec's range), both logged as violations | PASS |
+| `tests/test_graph_planner.py::test_sample_retrieval_handles_unavailable_store_gracefully` | An unreachable Qdrant client factory yields empty per-leaf samples instead of raising | PASS |
+| `tests/test_graph_planner.py::test_sample_retrieval_handles_per_leaf_search_failure` | A `hybrid_search` failure for one leaf doesn't affect others / doesn't raise | PASS |
+| `tests/test_graph_build.py::test_graph_pauses_after_planner_then_resumes` | `create_run` + `run_planner_to_interrupt` reaches `awaiting_outline_approval` (registry + checkpoint agree); `resume` reaches `completed` | PASS |
+| `tests/test_graph_build.py::test_resume_before_approval_state_is_rejected` | `resume()` on a run with no checkpoint yet raises `KeyError` | PASS |
+| `tests/test_graph_build.py::test_apply_outline_edits_persists_through_the_checkpointer` | An edit applied via `apply_outline_edits` is visible on a **separate** subsequent `get_state` call (fresh checkpointer connection each time) | PASS |
+| `tests/test_graph_build.py::test_double_approve_is_rejected_after_completion` | Calling `resume()` twice raises `ValueError` the second time (not paused at the interrupt anymore) | PASS |
+| `tests/test_graph_build.py::test_checkpoint_survives_a_brand_new_graph_object_against_the_same_db_file` | A brand-new `SqliteSaver`/connection/`CompiledStateGraph` built against the same on-disk sqlite file (simulating a process restart) recovers the run's outline purely by `run_id` (spec.md non-negotiable #5, "everything resumes") | PASS |
+| `tests/test_runs_api.py::test_create_run_returns_queued_immediately` | `POST /api/runs` returns 202 with a queued/planning/awaiting-approval status immediately (planner runs as a background task) | PASS |
+| `tests/test_runs_api.py::test_full_interrupt_edit_approve_round_trip` | Full round trip through the FastAPI TestClient: create -> poll to `awaiting_outline_approval` -> `GET outline` -> edit title/word target -> `PATCH outline` -> re-`GET` confirms persistence -> `POST approve` -> `completed` | PASS |
+| `tests/test_runs_api.py::test_get_outline_before_ready_is_409` | `GET outline` for an unknown run_id is 404 | PASS |
+| `tests/test_runs_api.py::test_approve_before_outline_ready_is_409` | A second `POST approve` after the run already completed is 409 | PASS |
+| `tests/test_runs_api.py::test_unknown_format_spec_id_surfaces_as_run_error` | An unknown `format_spec_id` surfaces as run status `"error"` with a message, not an unhandled 500 or a silently stuck run | PASS |
+| `tests/test_runs_api.py::test_get_unknown_run_404s` | `GET`/`PATCH`/`POST approve` on an unknown run_id all 404 | PASS |
+
+Run: `cd draftforge && uv run pytest -q -k graph_state or graph_decisions or graph_planner or graph_build or runs_api` -> **24 passed**.
+Full suite: `cd draftforge && uv run pytest -q` -> **104 passed, 1 skipped** (Phase 0's
+22 + Phase 1's 32 + Phase 2's 26 + Phase 3's 24; the one skip is Phase 1's
+optional live-GROBID test, unrelated to Phase 3).
+
+### Build / smoke checks
+
+| Check | Purpose | Status |
+|---|---|---|
+| `npx tsc -b` | Frontend (incl. new `OutlineReview.tsx` + `api/client.ts` run/outline types) type-checks with no errors | PASS |
+| `npm run build` | Frontend still builds for production | PASS |
+| `npm run test -- --run` | Phase 0's 2 frontend tests still pass unmodified (no Phase 3 frontend unit tests were added — Outline Review's UI logic is exercised end-to-end through the backend API tests instead) | PASS |
+
+### Manual UI checks — NOT RUN this session (no browser available)
+
+| Check | Purpose | Status |
+|---|---|---|
+| Outline Review — light mode | Start-run form, run status badge, collapsible outline tree, inline edit fields, Save/Approve buttons all readable/usable | NOT RUN |
+| Outline Review — dark mode | Same, dark theme tokens applied, no unreadable contrast | NOT RUN |
+| Start a run end-to-end against a real backend + real LLM | Paste a real project id, pick a spec, confirm the outline appears once planning finishes, edit a section, approve, confirm status flips to "completed" | NOT RUN |
+| Collapse/expand a multi-child section (e.g. IEEE's "Method") | Toggle hides/shows its subsections without losing in-progress edits | NOT RUN |
+
+### Known gaps / notes
+
+- The planner's retrieval sample and LLM call are both mocked in every
+  automated test this session (no Qdrant, no GROBID-ingested project, no
+  real provider/API key) — the graceful-degradation path (unavailable
+  store) is exercised directly (`test_sample_retrieval_handles_*`), but a
+  real end-to-end "ingest a project, then plan against its real chunks"
+  run has not been performed. Flag for Phase 8's real-LLM end-to-end pass.
+- The planner currently produces outline nesting that is exactly the
+  `FormatSpec`'s own section tree (no additional planner-introduced
+  subsections beyond it) — see DECISIONS.md. A more elaborate planner that
+  subdivides a leaf section into finer sub-leaves is explicitly out of
+  scope for Phase 3.
+- No new frontend Vitest tests were added for `OutlineReview.tsx` — its
+  logic (create/poll/edit/approve) is a thin wrapper over the same API
+  contract already covered end-to-end by `tests/test_runs_api.py`; a
+  human/browser pass is the primary way to validate the tree UI itself
+  (see the manual checks above).
+- `run_planner_to_interrupt` swallows exceptions and reports them via the
+  run registry's `error` field rather than propagating — this is
+  deliberate (it runs as a `BackgroundTasks` callback with no caller to
+  raise to) but means a bug inside the planner node surfaces only through
+  polling `GET /api/runs/{id}`, never as a stack trace in the request that
+  started the run.

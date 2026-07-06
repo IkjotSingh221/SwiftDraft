@@ -73,6 +73,43 @@ export interface SourceStatus {
   error: string | null;
 }
 
+// ---------------------------------------------------------------------------
+// Runs / outline (Phase 3 — planner + human-in-the-loop)
+// ---------------------------------------------------------------------------
+
+export type RunStatus =
+  | "queued"
+  | "planning"
+  | "awaiting_outline_approval"
+  | "drafting"
+  | "verifying"
+  | "rendering"
+  | "completed"
+  | "error";
+
+export interface Run {
+  id: string;
+  project_id: string;
+  format_spec_id: string;
+  status: RunStatus;
+  error: string | null;
+}
+
+export interface RunCreate {
+  project_id: string;
+  format_spec_id: string;
+  run_config?: Record<string, unknown>;
+}
+
+export interface OutlineNode {
+  id: string;
+  title: string;
+  brief: string | null;
+  target_words: number | null;
+  source_tags: string[];
+  children: OutlineNode[];
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(path, {
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
@@ -119,6 +156,17 @@ export const api = {
   },
   listSources: (projectId: string) =>
     request<SourceStatus[]>(`${API_BASE}/projects/${projectId}/sources`),
+  createRun: (payload: RunCreate) =>
+    request<Run>(`${API_BASE}/runs`, { method: "POST", body: JSON.stringify(payload) }),
+  getRun: (runId: string) => request<Run>(`${API_BASE}/runs/${runId}`),
+  getOutline: (runId: string) => request<OutlineNode[]>(`${API_BASE}/runs/${runId}/outline`),
+  patchOutline: (runId: string, nodes: OutlineNode[]) =>
+    request<OutlineNode[]>(`${API_BASE}/runs/${runId}/outline`, {
+      method: "PATCH",
+      body: JSON.stringify(nodes),
+    }),
+  approveRun: (runId: string) =>
+    request<Run>(`${API_BASE}/runs/${runId}/approve`, { method: "POST" }),
 };
 
 export const ROLES: Role[] = [

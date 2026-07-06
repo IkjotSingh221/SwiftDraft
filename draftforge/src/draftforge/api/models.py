@@ -6,9 +6,9 @@ so route modules can import stable names without editing this file again.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # ---------------------------------------------------------------------------
 # Settings / model registry (Phase 0 — fully functional)
@@ -77,21 +77,30 @@ class SourceStatus(BaseModel):
 
 
 class RunCreate(BaseModel):
-    """TODO(Phase 3): fields for starting a run (project id, options, ...)."""
+    """Fields for starting a run: project + format spec + free-form run config
+    (e.g. topic/notes/retrieval sample size) passed through to the planner."""
 
     project_id: str
+    format_spec_id: str
+    run_config: dict[str, Any] = Field(default_factory=dict)
 
 
 class Run(BaseModel):
-    """TODO(Phase 3): full run record."""
+    """A run's coarse status, as tracked by the run registry (see
+    `graph/build_graph.py`'s DECISIONS.md entry) — not the full checkpointed
+    graph state (that's `GET /runs/{id}/outline` etc.)."""
 
     id: str
     project_id: str
-    status: str = "created"
+    format_spec_id: str
+    status: str = "queued"
+    error: str | None = None
 
 
 class OutlineNode(BaseModel):
-    """TODO(Phase 3): a single node in the planner's outline tree."""
+    """A single node in the planner's outline tree. Field-for-field mirror of
+    `graph.state.OutlineTreeNode` (see that module's docstring for why they're
+    kept as two separate types)."""
 
     id: str
     title: str
