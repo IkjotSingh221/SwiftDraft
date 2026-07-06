@@ -305,3 +305,77 @@ optional live-GROBID test, unrelated to Phase 3).
   raise to) but means a bug inside the planner node surfaces only through
   polling `GET /api/runs/{id}`, never as a stack trace in the request that
   started the run.
+
+---
+
+## Phase 4 — Drafter subgraph
+
+### Automated — backend (`uv run pytest`)
+
+| Test | Purpose | Status |
+|---|---|---|
+| `tests/test_graph_drafter.py::test_good_grades_draft_path_no_retries` | Good chunk grades -> exactly one query rewrite, no retries, leaf reaches "done" | PASS |
+| `tests/test_graph_drafter.py::test_poor_grades_retries_up_to_two_times` | Poor grades on every attempt -> exactly `MAX_QUERY_REWRITES + 1` (3) query-rewrite/retrieval/grading attempts, never more, leaf still completes best-effort; decisions logged with `attempt` 0,1,2 | PASS |
+| `tests/test_graph_drafter.py::test_enforce_valid_bibkeys_strips_hallucinated_keys` | Unit test of the constraint-#2 enforcement function: invalid keys stripped, valid keys kept, a mixed marker keeps only its valid entries | PASS |
+| `tests/test_graph_drafter.py::test_hallucinated_bibkey_never_survives_into_saved_draft` | End-to-end: an LLM draft response containing a bogus `[@notreal]` key never survives into `result.citation_keys` or the file written to disk; stripping is logged as a `bibkey_enforcement` decision | PASS |
+| `tests/test_graph_drafter.py::test_critique_revise_triggers_exactly_one_revision_call` | A "revise" critique verdict triggers exactly one additional draft-system LLM call (the revision), never a loop; critique itself runs exactly once | PASS |
+| `tests/test_graph_drafter.py::test_leaf_pipeline_failure_never_raises_and_flags_the_section` | Any exception inside a leaf's pipeline (e.g. `resolve_model` failing) is caught, the leaf is marked "flagged" with no draft file, and the fan-out is never sunk by one bad leaf | PASS |
+| `tests/test_graph_drafter.py::test_fanout_produces_all_sections_with_bounded_parallelism` | A 5-leaf outline with `drafter_parallelism=2` produces a draft file + "done" status for every leaf, and the max concurrently-in-flight LLM calls observed is `<= 2` (and `> 1`, proving real parallelism, not serial execution) | PASS |
+| `tests/test_graph_drafter.py::test_apply_document_state_update_updates_registries_and_stays_compact` | The post-draft DocumentState update folds in section summary, citation keys, figure/table counters, and claims correctly, is a pure function (original untouched), and stays well under the ~4k token budget | PASS |
+| `tests/test_graph_drafter.py::test_apply_document_state_update_ignores_flagged_leaves` | A "flagged" (failed) leaf contributes nothing to DocumentState | PASS |
+| `tests/test_runs_sse.py::test_events_endpoint_delivers_section_status_and_token_usage` | A full mocked run (create -> approve, through the FastAPI TestClient) produces an SSE stream with `section_status` events in order queued -> drafting -> critiquing -> done per section, non-decreasing cumulative `token_usage`, and `run_status` drafting -> completed | PASS |
+| `tests/test_runs_sse.py::test_events_endpoint_404s_for_unknown_run` | `GET /runs/{id}/events` 404s for an unknown run_id instead of hanging/500ing | PASS |
+| `tests/test_runs_sse.py::test_tail_run_events_replays_full_history_on_reconnect` | Two independent calls to `api.sse.tail_run_events` against the same `events.jsonl` return the identical event list — proves the reattach-by-replay mechanism directly, without going through HTTP | PASS |
+
+Run: `cd draftforge && uv run pytest -q -k graph_drafter or runs_sse` -> **12 passed**.
+Full suite: `cd draftforge && uv run pytest -q` -> **116 passed, 1 skipped** (Phase 0-3's
+104 + Phase 4's 12; the one skip is Phase 1's optional live-GROBID test).
+
+### Build / smoke checks
+
+| Check | Purpose | Status |
+|---|---|---|
+| `npx tsc -b` | Frontend (incl. new `RunDashboard.tsx`, `api/sse.ts`, and `api/client.ts` section-status/decisions/SSE-url additions) type-checks with no errors | PASS |
+| `npm run build` | Frontend still builds for production | PASS |
+| `npm run test -- --run` | Phase 0's 2 frontend tests still pass unmodified (no new Vitest tests added — the dashboard's data-fetching/reduction logic is a thin wrapper over the same API/SSE contract already covered end-to-end by `tests/test_runs_sse.py` and `tests/test_graph_drafter.py`; a human/browser pass is the primary way to validate the dashboard UI itself, same precedent as Phase 3's Outline Review) | PASS |
+
+### Manual UI checks — NOT RUN this session (no browser available)
+
+| Check | Purpose | Status |
+|---|---|---|
+| Run Dashboard — light mode | Run-id input, status/token/cost summary, per-section chips, expandable decisions log all readable/usable | NOT RUN |
+| Run Dashboard — dark mode | Same, dark theme tokens applied, no unreadable contrast | NOT RUN |
+| Approve an outline and watch the dashboard live | Section chips progress queued -> drafting -> critiquing -> done in real time via SSE; token/cost counter increases | NOT RUN |
+| Expand a section's decisions log | Query rewrites/chunk grades/critique verdicts/bibkey enforcement appear, most-recent-first-or-in-order as logged | NOT RUN |
+| Reload the dashboard mid-run / after a resume | SSE reconnects and the full section-status history replays instead of starting blank | NOT RUN |
+
+### Known gaps / notes
+
+- **Two pre-existing Phase 3 tests now incur real (bounded) added latency.**
+  `tests/test_graph_build.py::test_graph_pauses_after_planner_then_resumes`
+  and `tests/test_runs_api.py`'s approve-round-trip tests only mock the
+  planner's model/retrieval, not the drafter/critic roles or
+  `ingest.store.hybrid_search`. Now that `resume()` actually runs the
+  drafter fan-out, each of their `resume()`/`approve` calls attempts a real
+  (unreachable, in this sandboxed environment) local Ollama call per leaf,
+  which costs ~3s (two retry backoff sleeps in `llm/base.py`, which Phase 4
+  may not edit) before failing fast and marking that leaf "flagged" — see
+  DECISIONS.md's "fail fast on the first LLM failure per leaf" entry for why
+  it's bounded to ~3s per leaf rather than compounding across every LLM call
+  a leaf's pipeline could make. Net effect: the full suite runs in ~50s
+  instead of a few seconds, but every test still passes deterministically
+  and no existing test file needed to change. If this becomes a real
+  problem, the fix would be adding a fast local-provider reachability probe
+  before the first `.complete()` call per leaf (mirroring `api/app.py`'s
+  `_reachable()` health-check helper) — deliberately not done here since it
+  would add a code path not exercised by anything in Phase 4's own scope.
+- The drafter's LLM chunk-relevance grading and query-rewrite calls both
+  resolve the "drafter" role model (there is no separate role for them in
+  `llm/settings_store.ROLES`) — see DECISIONS.md.
+- No live-LLM/live-Qdrant Phase 4 test was run this session (no Docker, no
+  GPU, no API keys) — every test above mocks `resolve_model` and
+  `hybrid_search`/`get_qdrant_client` at the boundary. A real end-to-end
+  draft (real provider, real ingested project) is flagged for Phase 8's
+  real-LLM pass.
+- Frontend manual/visual checks are unexercised (no browser this session);
+  flag for a human pass before Phase 8's full manual sweep.

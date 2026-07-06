@@ -110,6 +110,34 @@ export interface OutlineNode {
   children: OutlineNode[];
 }
 
+// ---------------------------------------------------------------------------
+// Section status / decisions (Phase 4 — drafter subgraph + run dashboard)
+// ---------------------------------------------------------------------------
+
+export type SectionRunStatus =
+  | "queued"
+  | "drafting"
+  | "critiquing"
+  | "verifying"
+  | "done"
+  | "flagged";
+
+export interface SectionStatus {
+  section_id: string;
+  title: string;
+  status: SectionRunStatus;
+  tokens_used: number;
+  cost_usd: number;
+}
+
+export interface DecisionRecord {
+  ts: string;
+  run_id: string;
+  node: string;
+  kind: string;
+  payload: Record<string, unknown>;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(path, {
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
@@ -167,7 +195,20 @@ export const api = {
     }),
   approveRun: (runId: string) =>
     request<Run>(`${API_BASE}/runs/${runId}/approve`, { method: "POST" }),
+  listSections: (runId: string) =>
+    request<SectionStatus[]>(`${API_BASE}/runs/${runId}/sections`),
+  listDecisions: (runId: string, sectionId?: string) =>
+    request<DecisionRecord[]>(
+      `${API_BASE}/runs/${runId}/decisions${sectionId ? `?section_id=${encodeURIComponent(sectionId)}` : ""}`,
+    ),
 };
+
+/** Absolute path to the SSE events endpoint for a run — passed straight to
+ * `EventSource` by `useRunEvents` (see `api/sse.ts`); not fetched via
+ * `request()` since it's a streaming GET, not a JSON round trip. */
+export function runEventsUrl(runId: string): string {
+  return `${API_BASE}/runs/${runId}/events`;
+}
 
 export const ROLES: Role[] = [
   "planner",

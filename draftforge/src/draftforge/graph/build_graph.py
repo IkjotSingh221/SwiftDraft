@@ -2,18 +2,19 @@
 API uses: `create_run`, `get_state`, `resume` (plus supporting helpers
 `run_planner_to_interrupt`, `apply_outline_edits`, `get_run_meta`).
 
-## Graph shape (Phase 3)
+## Graph shape (Phase 4)
 
-    START -> planner -> END
+    START -> planner -> drafter -> END
              ^^^^^^^
     interrupt_after=["planner"]
 
-Phase 3 has exactly one real node. Phases 4/5 extend this by inserting real
-nodes between "planner" and END (drafter fan-out subgraph, citation
-verifier, continuity editor, compliance checker) — see the module docstring
-in `state.py` for the state fields those nodes read/write. Nothing about the
-interrupt/checkpoint/resume machinery below needs to change for that; only
-`get_graph()`'s node/edge wiring does.
+"drafter" is `graph/drafter.py::drafter_fanout_node` — see that module's
+docstring for the corrective-RAG-per-leaf pipeline and its bounded
+(`ThreadPoolExecutor`) fan-out. Phase 5 extends this further by inserting
+more real nodes between "drafter" and END (citation verifier, continuity
+editor, compliance checker) — see `get_graph()`'s own TODO for exactly what
+changes. Nothing about the interrupt/checkpoint/resume machinery below needs
+to change for that; only `get_graph()`'s node/edge wiring does.
 
 ## Interrupt mechanism
 
@@ -65,6 +66,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from draftforge.config import get_settings
 from draftforge.graph import decisions
+from draftforge.graph.drafter import drafter_fanout_node
 from draftforge.graph.planner import planner_node
 from draftforge.graph.state import DocumentState, RunState
 
@@ -96,17 +98,42 @@ def _open_graph(db_path: str | Path | None = None) -> Iterator[CompiledStateGrap
 def get_graph(checkpointer: SqliteSaver) -> CompiledStateGraph:
     """Compile the graph against a given checkpointer.
 
-    TODO(Phase 4): add the drafter fan-out subgraph as node(s) between
-    "planner" and END (read `state["leaf_briefs"]` + `state["document_state"]`
-    per leaf; write per-leaf drafts to disk, never back into this state —
-    see state.py). TODO(Phase 5): insert the citation verifier / continuity
-    editor / compliance checker after drafting, routing violations back to
-    the owning leaf's drafter.
+    ## Graph shape (Phase 4)
+
+        START -> planner -> drafter -> END
+                 ^^^^^^^
+        interrupt_after=["planner"]
+
+    "drafter" (`graph/drafter.py::drafter_fanout_node`) is a single node that
+    internally fans out over every leaf brief with bounded parallelism (a
+    `ThreadPoolExecutor`, not nested LangGraph subgraphs/`Send` — see
+    drafter.py's module docstring and DECISIONS.md for why) and folds each
+    leaf's result into `document_state`/`section_status`. It is currently the
+    LAST node before END, so it sets `status="completed"` itself.
+
+    TODO(Phase 5): insert the citation verifier / continuity editor /
+    compliance checker as new node(s) BETWEEN "drafter" and END (i.e. change
+    `builder.add_edge("drafter", END)` below to
+    `builder.add_edge("drafter", "citation_verifier")` etc., ending with
+    `builder.add_edge(<last Phase 5 node>, END)`). Two things Phase 5 needs
+    from this file:
+      1. `drafter_fanout_node`'s return dict should stop setting
+         `"status": "completed"` once something follows it — have it return
+         an intermediate status (e.g. "verifying") instead, and let the new
+         last node set "completed"/"error".
+      2. A per-section redraft (`POST /runs/{id}/sections/{id}/redraft`) can
+         reuse `drafter.draft_leaf(brief, document_state_snapshot, ...)`
+         directly for just the one flagged leaf, then re-run
+         `drafter.apply_document_state_update` and patch
+         `state["section_status"][id]` via `update_state` — no need to
+         replay the whole fan-out node.
     """
     builder = StateGraph(RunState)
     builder.add_node("planner", planner_node)
+    builder.add_node("drafter", drafter_fanout_node)
     builder.add_edge(START, "planner")
-    builder.add_edge("planner", END)
+    builder.add_edge("planner", "drafter")
+    builder.add_edge("drafter", END)
     return builder.compile(checkpointer=checkpointer, interrupt_after=["planner"])
 
 
@@ -271,11 +298,16 @@ def apply_outline_edits(
 def resume(run_id: str, *, db_path: str | Path | None = None) -> RunState:
     """Resume the graph past the planner interrupt (student approval).
 
-    Phase 3: nothing follows the planner node yet (`planner -> END`), so
-    resuming just finalizes the run as "completed". Phase 4/5 insert real
-    nodes between "planner" and END (see `get_graph`'s TODOs) — once that
-    happens, this same `graph.invoke(None, config)` call actually executes
-    them instead of immediately completing.
+    Phase 4: `planner -> drafter -> END` — resuming now actually runs the
+    bounded-parallelism drafter fan-out (see `graph/drafter.py`), which can
+    take a while for a real run. This call is still fully synchronous/
+    blocking (matching Phase 3's `POST /runs/{id}/approve` contract exactly —
+    see `api/routes_runs.py`), so the run registry is stamped "drafting"
+    *before* the (possibly slow) `graph.invoke` below, purely so a concurrent
+    `GET /runs/{id}` from another request can observe progress while this
+    call is still in flight. Phase 5 inserts more nodes after "drafter" (see
+    `get_graph`'s TODOs) — once that happens, this same
+    `graph.invoke(None, config)` call executes those too.
 
     Raises `KeyError` if the run has no checkpoint yet, `ValueError` if the
     run isn't currently paused at the outline-approval interrupt.
@@ -288,6 +320,7 @@ def resume(run_id: str, *, db_path: str | Path | None = None) -> RunState:
             f"run {run_id!r} is not awaiting outline approval (status={current.get('status')!r})"
         )
 
+    _registry_set(run_id, status="drafting")
     with _open_graph(db_path) as graph:
         config = _thread_config(run_id)
         graph.invoke(None, config)

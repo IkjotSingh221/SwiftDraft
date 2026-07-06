@@ -320,3 +320,143 @@ phases: add to the bottom, don't rewrite history.
   time a run starts, and the planner must still produce a valid,
   fully-structured outline (with empty `source_tags`) rather than fail the
   whole run.
+
+## Phase 4
+
+- **Fan-out mechanism: a single LangGraph node (`drafter_fanout_node`)
+  driving a `concurrent.futures.ThreadPoolExecutor`**, not nested LangGraph
+  subgraphs / the `Send` API. Every LLM/retrieval call in this codebase is a
+  blocking synchronous call (no async client anywhere in `llm/`), so a
+  bounded thread pool is the natural concurrency primitive without inventing
+  an async wrapper layer just for this. It also keeps the checkpointer's
+  unit of work exactly one `RunState` update per `graph.invoke()` call,
+  matching the existing "reopen a fresh SqliteSaver connection per call"
+  resumability story — nested per-leaf subgraph checkpoints would need their
+  own `thread_id` scheme for no corresponding benefit in a single-user local
+  tool. Parallelism is `run_config["drafter_parallelism"]`, default 3
+  (`drafter.DEFAULT_PARALLELISM`).
+
+- **DocumentState update is a plain function (`apply_document_state_update`),
+  called from the fan-out node's main thread as each future completes**, not
+  a second LangGraph node. It plays the role of spec.md's "post-draft node"
+  exactly, just implemented as a step in the same node's `as_completed` loop
+  (serialized by construction — only the main thread ever calls it) so it
+  composes cleanly with the thread-pool fan-out above, via a small
+  `_DocumentStateBox` that gives each leaf a consistent snapshot at the
+  moment it STARTS (not at submission time), so leaves that start later
+  (once a worker slot frees up) see the latest state, not a stale one taken
+  when all tasks were originally submitted.
+
+- **Hallucinated bibkeys are impossible by construction via one enforcement
+  function, `drafter.enforce_valid_bibkeys`.** The drafter is only ever given
+  the bibkeys attached to ITS OWN retrieved chunks (`SearchHit.bibkeys`) as
+  the "valid citation keys" set in its prompt. After every LLM call that can
+  emit `[@key]` markers (initial draft AND the one revision), this function
+  strips any key not in that set before the text is written to disk or
+  folded into `DocumentState.citation_keys` — a marker left with zero valid
+  keys is removed entirely, a mixed marker keeps only its valid entries.
+  There is no code path from an LLM response to a saved draft that skips
+  this step, so an invented key literally cannot survive. Stripped keys are
+  logged as a `bibkey_enforcement` decision for visibility.
+
+- **A leaf's pipeline aborts on its FIRST failing LLM call, rather than
+  retrying through the whole pipeline.** `draft_leaf` catches any exception
+  broadly and marks the leaf "flagged" immediately — it does not attempt to
+  keep going through retrieval/draft/critique after resolve_model/`complete()`
+  has already failed once. This matters in practice: `llm/base.py`'s own
+  retry-with-backoff (not something Phase 4 may edit) means every unreachable
+  provider call already costs ~3s (two sleeps) before raising; without a
+  fail-fast leaf, a leaf with N possible LLM calls could cost N×3s instead of
+  a bounded 3s. This is also why Phase 3's `test_graph_build.py`/
+  `test_runs_api.py` tests (which mock only the planner's model/retrieval,
+  not the drafter/critic roles or `hybrid_search`) still pass unmodified once
+  the drafter node is wired in after planner — each of their `resume()` calls
+  now genuinely runs the drafter fan-out against an unreachable local Ollama
+  endpoint (the seeded default for `drafter`/`critic`) and Qdrant, but every
+  leaf fails fast on its first query-rewrite call and is marked "flagged", so
+  the run still reaches `status="completed"` (with all sections flagged)
+  in bounded, small added wall-clock time instead of hanging or failing the
+  test. Known gap: this does add real (if bounded) latency to those two
+  pre-existing tests since they run unmocked against local network calls that
+  fail; see TESTING.md.
+
+- **Filtered hybrid retrieval issues one `hybrid_search` call per source tag
+  and merges results (best score per chunk_id wins), rather than passing
+  `brief.source_tags` straight through as a single filter.**
+  `ingest/store.hybrid_search`'s convenience filters only match ONE
+  `source_id` (or `section_path`) value per call (an AND of single-value
+  equality filters, no "any of these values" OR support), and Phase 4 may not
+  edit `ingest/store.py` to add one. Since the planner already populates a
+  leaf's `source_tags` from the `source_id`s of its own retrieval sample
+  (see Phase 3's `_skeleton_node`), tags ARE source ids in practice, so
+  querying once per tag and merging is both correct and requires no changes
+  to `ingest/store.py`.
+
+- **Query-rewrite/grading/drafting/revision all resolve the "drafter" role
+  model; only self-critique resolves "critic".** `llm/settings_store.ROLES`
+  has no separate "query rewriter" or "chunk grader" role, and spec.md
+  explicitly allows "LLM (role drafter or a dedicated small prompt)" for
+  query rewrite — reusing the existing "drafter" role for every drafter-side
+  call keeps the Settings screen's five roles unchanged (no new role, no
+  settings-store schema change) while still resolving every model at call
+  time via `resolve_model`, never hardcoded.
+
+- **Self-critique triggers AT MOST one revision, never a loop.** spec.md says
+  "self-critique against the brief -> one revision" (singular). `draft_leaf`
+  calls critique exactly once; if the verdict is `"revise"`, exactly one
+  revision call is made and its (re-enforced) output is final — there is no
+  second critique pass on the revision. Iterating critique/revise further is
+  explicitly out of scope for Phase 4 (Phase 5's citation verifier is the
+  mechanism for further redraft loops, with its own 2-loop-then-flag-for-human
+  bound per spec.md).
+
+- **Section drafts are written to
+  `data/runs/{run_id}/sections/{leaf_id}.md`**, one file per leaf, via
+  `drafter.section_draft_path` — reusing `graph/decisions.run_dir(run_id)` as
+  the run's data directory (so all of a run's artifacts —
+  `decisions.jsonl`, `events.jsonl`, `sections/*.md` — live under one
+  `data/runs/{run_id}/` tree). Only the file path (plus status/citation
+  keys/word-adjacent counts) is ever written back into `RunState` — never the
+  prose itself (constraints #1/#6).
+
+- **A separate `events.jsonl` per run (distinct from `decisions.jsonl`)
+  backs the SSE dashboard**, written by `drafter.emit_event`/read by
+  `drafter.read_events`. `decisions.jsonl` (Phase 3) is the full agent-
+  decision audit trail with complete payloads (query rewrites, grades,
+  critique verdicts, bibkey enforcement) — potentially large and detailed.
+  `events.jsonl` is a small, UI-shaped stream: `section_status`
+  (queued/drafting/critiquing/done/flagged transitions),
+  `token_usage` (per-call and cumulative tokens/cost), and `run_status`
+  (drafting/completed/error). Keeping them separate means the SSE tailer
+  never has to filter/re-shape the (bigger, less frequent, more detailed)
+  decisions log, and the dashboard's decisions-log viewer hits its own small
+  `GET /runs/{id}/decisions` endpoint instead.
+
+- **SSE reattachment strategy: the durable `events.jsonl` file IS the replay
+  buffer — no separate in-memory pub/sub.** `api.sse.tail_run_events` always
+  opens the file from byte 0 on a new connection, yields every existing line,
+  then keeps polling (every 0.2s, with a 15s heartbeat when idle) for new
+  ones, terminating once the run registry reports a terminal status AND a
+  poll iteration reads zero new lines. Since drafting happens in worker
+  threads (not the async event loop FastAPI runs on), a real in-memory
+  `asyncio.Queue`-per-run broadcaster would need cross-thread signaling
+  machinery for no benefit over "just tail the file" in a single-user local
+  tool — and file-tailing gets reattachment after a crash/resume for free
+  (the dashboard's next `GET /runs/{id}/events` call just replays the whole
+  history again).
+
+- **`POST /runs/{id}/approve` stays fully synchronous** (unchanged from
+  Phase 3 — still one direct `build_graph.resume(run_id)` call in the request
+  handler), even though `resume()` now actually runs the (potentially slow)
+  drafter fan-out. This was a deliberate choice to avoid touching
+  `tests/test_runs_api.py`'s existing contract, which asserts the response
+  body's `status` is already `"completed"` immediately after the POST
+  returns (no polling). For a real multi-minute drafting run this means the
+  `/approve` HTTP request blocks for the whole run — acceptable for a
+  single-user local tool (FastAPI still serves other concurrent requests,
+  e.g. `GET /runs/{id}` or the SSE stream, from other worker threads while
+  one thread blocks in `resume()`), and `build_graph.resume` stamps the run
+  registry `"drafting"` right before invoking the graph specifically so a
+  concurrent poller can observe progress. Phase 5 may want to revisit this
+  once the verifier/continuity/compliance loop adds even more per-run
+  latency.
