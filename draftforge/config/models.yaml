@@ -1,0 +1,47 @@
+# Model registry — the single source of truth for models selectable in the UI.
+# Adding a new model = add an entry here (and, if it's a new provider, one new
+# provider file + one PROVIDER_CLASSES entry in llm/registry.py). Nothing else
+# changes.
+models:
+  - name: claude-sonnet-4-6
+    provider: anthropic
+    model: claude-sonnet-4-6
+    api_key_env: ANTHROPIC_API_KEY
+    cost_per_mtok_in: 3.0
+    cost_per_mtok_out: 15.0
+    local: false
+    default: true
+
+  - name: claude-opus-4-1
+    provider: anthropic
+    model: claude-opus-4-1
+    api_key_env: ANTHROPIC_API_KEY
+    cost_per_mtok_in: 15.0
+    cost_per_mtok_out: 75.0
+    local: false
+
+  - name: gemini-2.5-pro
+    provider: gemini
+    model: gemini-2.5-pro
+    api_key_env: GEMINI_API_KEY
+    cost_per_mtok_in: 1.25
+    cost_per_mtok_out: 10.0
+    local: false
+
+  - name: openrouter-llama-3.1-70b
+    provider: openrouter
+    model: meta-llama/llama-3.1-70b-instruct
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPENROUTER_API_KEY
+    cost_per_mtok_in: 0.35
+    cost_per_mtok_out: 0.4
+    local: false
+
+  - name: ollama-llama3.1-8b
+    provider: ollama
+    model: llama3.1:8b
+    base_url: http://localhost:11434/v1
+    cost_per_mtok_in: 0.0
+    cost_per_mtok_out: 0.0
+    local: true
+    note: "Fits comfortably in 8GB VRAM at Q4/fp16 with batch size 1; noticeably weaker reasoning than the API models — good for free iteration, not final drafts."

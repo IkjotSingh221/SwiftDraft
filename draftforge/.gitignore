@@ -1,0 +1,15 @@
+# Local data (SQLite settings DB, run artifacts, etc.)
+data/
+
+# Env
+.env
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
