@@ -500,3 +500,94 @@ optional live-GROBID test).
   per Phase 2's own DECISIONS.md note.
 - Frontend manual/visual checks are unexercised (no browser this session);
   flag for a human pass before Phase 8's full manual sweep.
+
+---
+
+## Phase 7 — Eval harness
+
+Run: `cd draftforge && uv run pytest -q`. All Phase 7 tests are hermetic
+(no Docker, GPU, or API keys) — retrieval uses deterministic synthetic
+embeddings against Qdrant's real `:memory:` engine; citation faithfulness
+injects a fake NLI judge; compliance and cost/latency need no LLM at all.
+See README.md's Evaluation section for what's real vs. synthetic-fixture vs.
+LLM/GPU-gated in the actual generated report.
+
+### Automated — backend (`uv run pytest`)
+
+| Test | Purpose | Status |
+| --- | --- | --- |
+| `test_evals_retrieval.py::test_recall_at_k_hand_computed` | `recall_at_k` matches a hand-computed value on a toy ranked list | PASS |
+| `test_evals_retrieval.py::test_recall_at_k_empty_relevant_set_is_zero` | Empty relevant set -> recall 0.0, not a division error | PASS |
+| `test_evals_retrieval.py::test_reciprocal_rank_hand_computed` | `reciprocal_rank` matches hand-computed values (rank 1, rank 3, not found) | PASS |
+| `test_evals_retrieval.py::test_known_relevant_chunk_in_top5_known_mrr_toy_case` | A 2-query toy case's averaged MRR (2/3) matches hand computation | PASS |
+| `test_evals_retrieval.py::test_load_fixture_reads_the_shipped_labeled_set` | The shipped labeled fixture (`tests/fixtures/evals/retrieval_fixture.json`) loads with every query carrying known-relevant chunk ids | PASS |
+| `test_evals_retrieval.py::test_all_three_ablation_configs_produce_a_row` | `run_ablation` returns exactly one row each for dense_only/sparse_only/hybrid, all metrics in [0,1], recall@10 >= recall@5 | PASS |
+| `test_evals_retrieval.py::test_known_relevant_chunk_lands_in_top5_for_hybrid` | Hybrid config: a known-relevant chunk lands in the top 5 for every labeled query (recall@5 == MRR == 1.0), via real `hybrid_search`/RRF against Qdrant `:memory:` | PASS |
+| `test_evals_retrieval.py::test_run_retrieval_eval_default_is_clearly_labeled_synthetic` | The default (no `live=True`) result is labeled `synthetic=True` with a note explaining why | PASS |
+| `test_evals_compliance.py::test_compliant_draft_has_zero_violations_for_both_shipped_specs` | `build_compliant_draft` + `validate_document` produce zero violations for both `ieee_report` and `university_thesis` | PASS |
+| `test_evals_compliance.py::test_run_compliance_eval_ships_at_least_three_drafts_per_spec` | >=3 fixture drafts (actually 4) per shipped spec, per spec.md's requirement | PASS |
+| `test_evals_compliance.py::test_run_compliance_eval_pass_rate_reflects_some_pass_some_fail` | Pass rate is strictly between 0% and 100% for both specs (not trivially all-pass or all-fail) | PASS |
+| `test_evals_compliance.py::test_each_expected_violation_code_is_produced_by_its_own_variant` | `over_word_limit`/`missing_required_section`/`malformed_citation` each trigger exactly their named violation code | PASS |
+| `test_evals_compliance.py::test_violation_code_counts_sum_matches_total_violations_across_drafts` | Per-spec violation-code-count totals reconcile with the sum of per-draft violation counts | PASS |
+| `test_evals_compliance.py::test_only_error_severity_violations_count_against_pass_rate` | Pins the current "every violation is ERROR severity" assumption the pass-rate calculation relies on | PASS |
+| `test_evals_citation_faithfulness.py::test_faithfulness_rate_computed_correctly_with_injected_judge` | Faithfulness rate (2/3) matches a hand-computed value against an injected fake NLI judge; exact NLI call count verified (one batched call per section) | PASS |
+| `test_evals_citation_faithfulness.py::test_sampling_respects_sample_size_and_is_deterministic_for_a_fixed_seed` | Sampling honors `sample_size` and is reproducible for a fixed seed | PASS |
+| `test_evals_citation_faithfulness.py::test_no_judge_configured_reports_not_run_never_a_fabricated_rate` | No `provider`/`live=True` -> `status="not_run"`, `faithfulness_rate is None` (never fabricated) | PASS |
+| `test_evals_citation_faithfulness.py::test_draft_with_no_citations_reports_not_run` | A draft with zero cited claims -> `status="not_run"`, not a crash or a vacuous 100% | PASS |
+| `test_evals_citation_faithfulness.py::test_for_run_with_no_llm_configured_reports_not_run` | The run-level entrypoint against a real (fixture) run dir -> "not run", still counts claims | PASS |
+| `test_evals_citation_faithfulness.py::test_for_run_unknown_run_id_reports_not_run` | Unknown run_id -> "not run" with a clear reason, not a crash | PASS |
+| `test_evals_citation_faithfulness.py::test_for_run_with_no_drafted_sections_reports_not_run` | A run with no `sections/` dir yet -> "not run" | PASS |
+| `test_evals_citation_faithfulness.py::test_spot_check_markdown_table_and_csv_export` | The human-spot-check markdown table and CSV export both round-trip the sampled verdicts | PASS |
+| `test_evals_cost_latency.py::test_compute_cost_latency_per_run_totals` | Run-level tokens/cost (from the last `cumulative_*` event) and wall-clock (max ts - min ts) match a hand-built fixture | PASS |
+| `test_evals_cost_latency.py::test_compute_cost_latency_per_section_breakdown` | Per-section tokens and wall-clock match the hand-built fixture for two overlapping sections | PASS |
+| `test_evals_cost_latency.py::test_compute_cost_latency_empty_events_is_all_zero_not_an_error` | No events -> an all-zero result, not an exception | PASS |
+| `test_evals_cost_latency.py::test_compute_cost_latency_falls_back_to_summing_when_no_cumulative_field` | Missing `cumulative_tokens`/`cumulative_cost_usd` -> falls back to summing `tokens_used`/`cost_usd` | PASS |
+| `test_evals_cost_latency.py::test_cost_latency_for_run_reads_a_real_events_jsonl_file` | `cost_latency_for_run` reads a real on-disk `events.jsonl` via `graph.drafter.read_events`, reused unmodified | PASS |
+| `test_evals_cost_latency.py::test_cost_latency_for_run_missing_file_is_all_zero_not_an_error` | Missing `events.jsonl` -> all-zero result, not an error | PASS |
+| `test_evals_report.py::test_build_report_contains_all_four_sections_with_no_run_id` | The rendered markdown contains all four `## N.` section headers, real retrieval+compliance numbers, and honest "not run" text for the run-scoped sections | PASS |
+| `test_evals_report.py::test_build_report_never_fabricates_live_numbers_when_live_is_off` | `live=False` -> the report says so explicitly and never claims a live retrieval number | PASS |
+| `test_evals_report.py::test_build_report_degrades_gracefully_for_an_unknown_run_id` | An unknown `--run` id doesn't crash `build_report` | PASS |
+| `test_evals_report.py::test_build_report_with_a_real_run_includes_cost_latency_numbers` | A real fixture run's token count appears verbatim in the rendered report | PASS |
+| `test_evals_report.py::test_write_report_writes_global_path_always` | `write_report` always writes `{data_dir}/evals/eval_report.md` | PASS |
+| `test_evals_report.py::test_write_report_also_writes_run_artifacts_path_when_run_given` | With a known `run_id`, `write_report` ALSO writes `data/runs/{run_id}/artifacts/eval_report.md`, confirmed to equal `render.pandoc.artifacts_dir(run_id)/"eval_report.md"` (the exact path the Phase 6 artifact whitelist serves) | PASS |
+| `test_evals_report.py::test_write_report_skips_run_artifacts_path_for_unknown_run` | An unknown `run_id` -> only the global path is written, not an error | PASS |
+
+Run: `cd draftforge && uv run pytest -q -k evals` -> **35 passed**.
+Full suite: `cd draftforge && uv run pytest -q` -> **200 passed, 2 skipped**
+(Phase 0-6's 165 + Phase 7's 35; the two skips are Phase 1's optional live-GROBID
+test and Phase 6's optional live-Pandoc test, both unrelated to Phase 7).
+
+### Manual / smoke checks
+
+| Check | Purpose | Status |
+| --- | --- | --- |
+| `uv run python -m draftforge.evals` | Runs the full harness standalone, writes `data/evals/eval_report.md`, prints the report to stdout | PASS |
+| `uv run python -m draftforge.evals --run <run_id>` | Also writes `data/runs/{run_id}/artifacts/eval_report.md`; confirmed via a hand-fabricated run (fake `events.jsonl` + one section file) that the report's cost/latency numbers match | PASS |
+| `GET /runs/{id}/artifacts` reflects the eval report once written | Confirmed by construction (`list_artifacts` marks `available` purely via `path.exists()` on the exact path `write_report` writes to) — the existing Phase 6 `test_render_api.py` suite already asserts this artifact 404s before the file exists; no Phase 7 code touches `routes_runs.py` | PASS (via existing Phase 6 test + this phase's `test_write_report_also_writes_run_artifacts_path_when_run_given`) |
+
+### Known gaps / notes
+
+- **Retrieval numbers in the default report are SYNTHETIC**, not a
+  measurement of real BGE-M3/BM25 quality — no GPU or model weights in this
+  sandbox. See README.md's Evaluation section and DECISIONS.md for the full
+  rationale. The `DRAFTFORGE_LIVE=1` real-embedding path exists and is
+  wired up but has never actually been executed.
+- **Citation faithfulness has never produced a real rate this session** — no
+  LLM provider is configured/reachable. The harness reports this honestly
+  (`status="not_run"`) every time it's run here; only the hermetic
+  fake-judge test proves the math.
+- **Compliance numbers ARE real** (no LLM/GPU involved) and were actually
+  computed this session: both shipped specs show a 1/4 (25%) pass rate
+  across their 4 fixture drafts (1 deliberately compliant, 3 deliberately
+  broken). This eval also surfaced a real, previously-unexercised gap in
+  `validate_document`'s tree-completeness logic — see DECISIONS.md.
+- **Cost/latency is real whenever a run is given** — pure log aggregation,
+  no LLM/GPU. Verified against both a hand-built fixture and a real
+  (fabricated-for-testing) `events.jsonl` file this session; never verified
+  against a genuine multi-section LLM-drafted run (no reachable provider in
+  this sandbox), which is the same gap Phase 4/5's own TESTING.md entries
+  already flag for Phase 8's real-LLM pass.
+- No frontend changes were needed or made this phase — `Downloads.tsx`
+  already lists the `eval_report.md` row (Phase 6); it flips from
+  unavailable to available purely because the file now exists on disk once
+  the harness has been run for a given run_id.

@@ -1,0 +1,27 @@
+{
+  "_comment": "Phase 7 eval harness: a small LABELED retrieval set (query -> relevant chunk_ids). Hand-authored, not derived from any real corpus. Used by evals/retrieval_eval.py together with DETERMINISTIC SYNTHETIC embeddings (see synthetic_dense_embed/synthetic_sparse_embed) to exercise the real hybrid_search/RRF fusion code path against Qdrant's :memory: engine without a GPU. Recall/MRR numbers computed from this fixture are NOT a measurement of real BGE-M3/BM25 retrieval quality -- see README.md's Evaluation section.",
+  "chunks": [
+    {"chunk_id": "c1", "source_id": "s1", "section_path": ["Biology"], "page": 1, "bibkeys": ["doe2020"],
+     "text": "Photosynthesis converts sunlight into chemical energy stored in glucose molecules within plant cells."},
+    {"chunk_id": "c2", "source_id": "s1", "section_path": ["Biology"], "page": 1, "bibkeys": ["doe2020"],
+     "text": "Chlorophyll pigments absorb light energy which plants use to synthesize sugars during photosynthesis."},
+    {"chunk_id": "c3", "source_id": "s2", "section_path": ["Finance"], "page": 1, "bibkeys": ["lee2019"],
+     "text": "The stock market rallied today as investors reacted to strong quarterly earnings reports."},
+    {"chunk_id": "c4", "source_id": "s2", "section_path": ["Finance"], "page": 2, "bibkeys": ["lee2019"],
+     "text": "Trading volume on the exchange surged after the central bank announced a new interest rate policy."},
+    {"chunk_id": "c5", "source_id": "s3", "section_path": ["Sports"], "page": 1, "bibkeys": ["kim2021"],
+     "text": "The basketball league begins its championship playoffs next month with eight qualifying teams."},
+    {"chunk_id": "c6", "source_id": "s3", "section_path": ["Sports"], "page": 1, "bibkeys": ["kim2021"],
+     "text": "Players from the winning basketball team celebrated their season championship victory on the court."},
+    {"chunk_id": "c7", "source_id": "s4", "section_path": ["Astronomy"], "page": 1, "bibkeys": ["patel2022"],
+     "text": "Astronomers used the telescope to observe a distant planet orbiting its host star."},
+    {"chunk_id": "c8", "source_id": "s4", "section_path": ["Astronomy"], "page": 2, "bibkeys": ["patel2022"],
+     "text": "The planet's orbital period around the star was measured using gravitational timing data."}
+  ],
+  "queries": [
+    {"query": "what process lets vegetation harvest light to make its own food", "relevant_chunk_ids": ["c1", "c2"]},
+    {"query": "stock market trading volume and investor reaction", "relevant_chunk_ids": ["c3", "c4"]},
+    {"query": "professional teams compete for a championship title", "relevant_chunk_ids": ["c5", "c6"]},
+    {"query": "a planet orbiting a star observed by telescope", "relevant_chunk_ids": ["c7", "c8"]}
+  ]
+}
